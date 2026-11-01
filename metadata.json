@@ -1,0 +1,6 @@
+{
+  "name": "Shoukhin Home Decor ERP",
+  "description": "Mobile-first cloud ERP, inventory, Steadfast courier, accounting, and real-time analytics platform for Shoukhin Home Decor (erp.shoukhinhd.com).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

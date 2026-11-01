@@ -1,0 +1,61 @@
+{
+  "entities": {
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Trusted admin/owner record for role-based access control",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 200 },
+        "role": { "type": "string", "enum": ["owner", "admin", "manager", "staff", "viewer"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public team member profile without sensitive PII",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 200 },
+        "role": { "type": "string", "enum": ["owner", "admin", "manager", "staff", "viewer"] },
+        "active": { "type": "boolean" },
+        "updatedBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "email", "role", "active", "createdAt", "updatedAt"]
+    },
+    "ErpRecord": {
+      "title": "ErpRecord",
+      "description": " Core ERP entity record stored in collection tables (orders, products, combos, stock, expenses, budgets, purchases, ledger, months, checks, adDaily, settings, logs)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "table": { "type": "string", "enum": ["Orders", "Products", "Combos", "Stock", "Expenses", "Budgets", "Purchases", "Ledger", "Months", "Checks", "AdDaily", "Settings", "Log", "Tasks", "ProductMeta"] },
+        "orgId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "payload": { "type": "object" },
+        "updatedBy": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "table", "orgId", "payload", "updatedBy", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Trusted admin and role lookup documents"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Team member profiles and role assignments"
+    },
+    "/erp_records/{recordId}": {
+      "schema": { "$ref": "#/entities/ErpRecord" },
+      "description": "Unified ERP collection for Shoukhin Home Decor tables with offline persistence"
+    }
+  }
+}

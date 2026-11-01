@@ -1,0 +1,182 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1: Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedOwner() {
+      return isVerifiedUser() && request.auth.token.email == 'shamim.usfba@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedOwner() || (isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isStaffOrManager() {
+      return isAdmin() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['owner', 'admin', 'manager', 'staff']
+      );
+    }
+
+    // Validation Blueprints
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'role', 'createdAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+        data.role in ['owner', 'admin', 'manager', 'staff', 'viewer'] &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'role', 'active', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'email', 'role', 'active', 'updatedBy', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+        data.role in ['owner', 'admin', 'manager', 'staff', 'viewer'] &&
+        data.active is bool &&
+        (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidErpRecord(data) {
+      return data.keys().hasAll(['id', 'table', 'orgId', 'payload', 'updatedBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'table', 'orgId', 'payload', 'updatedBy', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.table in ['Orders', 'Products', 'Combos', 'Stock', 'Expenses', 'Budgets', 'Purchases', 'Ledger', 'Months', 'Checks', 'AdDaily', 'Settings', 'Log', 'Tasks', 'ProductMeta'] &&
+        data.orgId is string && data.orgId.size() >= 1 && data.orgId.size() <= 64 && data.orgId == 'shoukhin-hd' &&
+        data.payload is map && data.payload.keys().size() <= 60 &&
+        data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 && data.updatedBy == request.auth.uid &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // 1. Admins Collection
+    match /admins/{adminId} {
+      allow get: if isVerifiedUser() && isValidId(adminId) && (request.auth.uid == adminId || isAdmin());
+      allow list: if isVerifiedUser() && resource.data.uid == request.auth.uid;
+
+      allow create: if isVerifiedUser() &&
+        isValidId(adminId) &&
+        isValidAdminRecord(incoming()) &&
+        incoming().uid == adminId &&
+        incoming().createdAt == request.time &&
+        isAdmin();
+
+      allow update: if isVerifiedUser() &&
+        isValidId(adminId) &&
+        isValidAdminRecord(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['role', 'email']) &&
+        isAdmin();
+
+      allow delete: if isVerifiedUser() && isValidId(adminId) && isBootstrappedOwner();
+    }
+
+    // 2. Users Collection (Team & Multi-Role Management)
+    match /users/{userId} {
+      allow get: if isVerifiedUser() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list: if isVerifiedUser() && (resource.data.uid == request.auth.uid || resource.data.active == true);
+
+      allow create: if isVerifiedUser() &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == userId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            request.auth.uid == userId &&
+            incoming().email == request.auth.token.email &&
+            (
+              (isBootstrappedOwner() && incoming().role == 'owner' && incoming().active == true) ||
+              (!isBootstrappedOwner() && incoming().role in ['staff', 'viewer'] && incoming().active == true)
+            )
+          ) ||
+          isAdmin()
+        );
+
+      allow update: if isVerifiedUser() &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            request.auth.uid == userId &&
+            incoming().role == existing().role &&
+            incoming().active == existing().active &&
+            incoming().email == existing().email &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt', 'updatedBy'])
+          ) ||
+          (
+            isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'role', 'active', 'updatedAt', 'updatedBy'])
+          )
+        );
+
+      allow delete: if isVerifiedUser() && isValidId(userId) && isAdmin();
+    }
+
+    // 3. Unified ERP Records Collection
+    match /erp_records/{recordId} {
+      allow get: if isVerifiedUser() && isValidId(recordId) && existing().orgId == 'shoukhin-hd';
+      allow list: if isVerifiedUser() && resource.data.orgId == 'shoukhin-hd';
+
+      allow create: if isVerifiedUser() &&
+        isValidId(recordId) &&
+        isValidErpRecord(incoming()) &&
+        incoming().id == recordId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isStaffOrManager();
+
+      allow update: if isVerifiedUser() &&
+        isValidId(recordId) &&
+        isValidErpRecord(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().table == existing().table &&
+        incoming().orgId == existing().orgId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['payload', 'updatedBy', 'updatedAt']) &&
+        isStaffOrManager();
+
+      allow delete: if isVerifiedUser() &&
+        isValidId(recordId) &&
+        existing().orgId == 'shoukhin-hd' &&
+        isAdmin();
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "/",
+  "name": "Shoukhin Home Decor ERP",
+  "short_name": "ShoukhinERP",
+  "description": "Mobile-first cloud ERP, inventory, Steadfast courier, accounting, and real-time analytics for Shoukhin Home Decor.",
+  "theme_color": "#0f172a",
+  "background_color": "#0f172a",
+  "display": "standalone",
+  "start_url": "/",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
