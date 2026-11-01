@@ -29,7 +29,7 @@ service cloud.firestore {
     }
 
     function isBootstrappedOwner() {
-      return isVerifiedUser() && request.auth.token.email == 'shamim.usfba@gmail.com';
+      return isVerifiedUser() && request.auth.token.email == 'shoukhinhd@gmail.com';
     }
 
     function isAdmin() {

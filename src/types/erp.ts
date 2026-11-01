@@ -303,9 +303,24 @@ export interface SettingsRecord {
   vatRate: number;
   sfKey?: string;
   sfSecret?: string;
+  sfWebhookToken?: string;
   metaToken?: string;
   logo?: string;
   monthTargets?: Record<string, number>;
+}
+
+export interface SteadfastWebhookEvent {
+  id: string;
+  receivedAt: string;
+  notification_type: string;
+  consignment_id?: number | string;
+  invoice?: string;
+  status?: string;
+  cod_amount?: number;
+  delivery_charge?: number;
+  tracking_message?: string;
+  updated_at?: string;
+  raw?: Record<string, unknown>;
 }
 
 export interface LogRecord {

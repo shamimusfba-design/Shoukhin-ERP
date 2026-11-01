@@ -230,6 +230,8 @@ export function defaultSettings(existing?: Partial<SettingsRecord>): SettingsRec
     metaVersion: 'v23.0',
     usdRate: 122,
     vatRate: 15,
+    sfKey: 'hp465esy0vg4qfhh2tmc64kthtczvrfe',
+    sfSecret: 'tij9eaqybg07fndan7jniisz',
     monthTargets: {},
     ...existing,
   };
@@ -457,7 +459,7 @@ export function calculateOrderFinance(o: OrderRecord) {
   const fees = [o.shippingCharge, o.codCharge, o.returnCharge];
   const fee = fees.some((x) => x === null || x === undefined)
     ? null
-    : fees.reduce((a, x) => a + Number(x || 0), 0);
+    : fees.reduce((a: number, x) => a + Number(x || 0), 0);
 
   const facts = calculateLineFacts(o);
   const missing = !facts.length || facts.some((x) => x.cogs === null);
@@ -582,8 +584,8 @@ export function calculateCashView(state: ErpDatabaseState, today: string) {
   const purchases = (state.Purchases || []).filter((x) => !x.void);
   const opening = ledger.find((x) => x.kind === 'opening');
 
-  const bills = expenses
-    .map((x) => ({
+  const bills = [
+    ...expenses.map((x) => ({
       id: x.id,
       date: x.date,
       category: x.category,
@@ -592,19 +594,18 @@ export function calculateCashView(state: ErpDatabaseState, today: string) {
       paidBeforeOpening: x.paidBeforeOpening || 0,
       payments: x.payments || [],
       kind: 'expense' as const,
-    }))
-    .concat(
-      purchases.map((x) => ({
-        id: x.id,
-        date: x.date,
-        category: '',
-        supplier: x.supplier || 'Supplier',
-        total: x.total,
-        paidBeforeOpening: 0,
-        payments: x.payments || [],
-        kind: 'purchase' as const,
-      }))
-    );
+    })),
+    ...purchases.map((x) => ({
+      id: x.id,
+      date: x.date,
+      category: '',
+      supplier: x.supplier || 'Supplier',
+      total: x.total,
+      paidBeforeOpening: 0,
+      payments: x.payments || [],
+      kind: 'purchase' as const,
+    })),
+  ];
 
   const payments = bills.flatMap((x) =>
     (x.payments || []).map((y) => ({
@@ -1608,7 +1609,7 @@ export async function readXlsxFile(file: File): Promise<Record<string, string>[]
     let data: Uint8Array = bytes.slice(begin, begin + entry.size);
     if (entry.method === 8) {
       data = new Uint8Array(
-        await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer()
+        await new Response(new Blob([data as unknown as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer()
       );
     } else if (entry.method !== 0) {
       throw new Error('Unsupported XLSX compression. Please export as CSV.');

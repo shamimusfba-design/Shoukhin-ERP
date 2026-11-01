@@ -21,8 +21,8 @@ export const DIRTY_DOZEN_TESTS: DirtyDozenTestCase[] = [
     collection: 'admins',
     docId: 'spoofed_admin',
     operation: 'create',
-    auth: { uid: 'spoofed_admin', email: 'shamim.usfba@gmail.com', email_verified: false },
-    payload: { uid: 'spoofed_admin', email: 'shamim.usfba@gmail.com', role: 'owner', createdAt: 'SERVER_TIMESTAMP' },
+    auth: { uid: 'spoofed_admin', email: 'shoukhinhd@gmail.com', email_verified: false },
+    payload: { uid: 'spoofed_admin', email: 'shoukhinhd@gmail.com', role: 'owner', createdAt: 'SERVER_TIMESTAMP' },
     expectedResult: 'PERMISSION_DENIED',
   },
   {
@@ -49,7 +49,7 @@ export const DIRTY_DOZEN_TESTS: DirtyDozenTestCase[] = [
     collection: 'erp_records',
     docId: 'Orders_ord1',
     operation: 'create',
-    auth: { uid: 'owner_1', email: 'shamim.usfba@gmail.com', email_verified: true },
+    auth: { uid: 'owner_1', email: 'shoukhinhd@gmail.com', email_verified: true },
     payload: {
       id: 'Orders_ord1',
       table: 'Orders',
@@ -68,7 +68,7 @@ export const DIRTY_DOZEN_TESTS: DirtyDozenTestCase[] = [
     collection: 'erp_records',
     docId: 'Orders_ord1',
     operation: 'update',
-    auth: { uid: 'owner_1', email: 'shamim.usfba@gmail.com', email_verified: true },
+    auth: { uid: 'owner_1', email: 'shoukhinhd@gmail.com', email_verified: true },
     payload: {
       id: 'Orders_ord1',
       table: 'Orders',
@@ -87,7 +87,7 @@ export const DIRTY_DOZEN_TESTS: DirtyDozenTestCase[] = [
     collection: 'erp_records',
     docId: 'invalid$id!@#',
     operation: 'create',
-    auth: { uid: 'owner_1', email: 'shamim.usfba@gmail.com', email_verified: true },
+    auth: { uid: 'owner_1', email: 'shoukhinhd@gmail.com', email_verified: true },
     payload: {
       id: 'invalid$id!@#',
       table: 'Orders',
@@ -105,7 +105,7 @@ export const DIRTY_DOZEN_TESTS: DirtyDozenTestCase[] = [
     collection: 'erp_records',
     docId: 'Orders_ord2',
     operation: 'create',
-    auth: { uid: 'owner_1', email: 'shamim.usfba@gmail.com', email_verified: true },
+    auth: { uid: 'owner_1', email: 'shoukhinhd@gmail.com', email_verified: true },
     payload: {
       id: 'Orders_ord2',
       table: 'Orders',
@@ -123,7 +123,7 @@ export const DIRTY_DOZEN_TESTS: DirtyDozenTestCase[] = [
     collection: 'erp_records',
     docId: 'Orders_ord1',
     operation: 'update',
-    auth: { uid: 'owner_1', email: 'shamim.usfba@gmail.com', email_verified: true },
+    auth: { uid: 'owner_1', email: 'shoukhinhd@gmail.com', email_verified: true },
     payload: {
       id: 'Orders_ord1',
       table: 'Orders',
@@ -141,7 +141,7 @@ export const DIRTY_DOZEN_TESTS: DirtyDozenTestCase[] = [
     collection: 'erp_records',
     docId: 'Orders_ord1',
     operation: 'update',
-    auth: { uid: 'owner_1', email: 'shamim.usfba@gmail.com', email_verified: true },
+    auth: { uid: 'owner_1', email: 'shoukhinhd@gmail.com', email_verified: true },
     payload: {
       id: 'Orders_ord1',
       table: 'Orders',
@@ -159,7 +159,7 @@ export const DIRTY_DOZEN_TESTS: DirtyDozenTestCase[] = [
     collection: 'erp_records',
     docId: 'Orders_ord1',
     operation: 'update',
-    auth: { uid: 'owner_1', email: 'shamim.usfba@gmail.com', email_verified: true },
+    auth: { uid: 'owner_1', email: 'shoukhinhd@gmail.com', email_verified: true },
     payload: {
       id: 'Orders_ord1',
       table: 'Expenses',
@@ -177,7 +177,7 @@ export const DIRTY_DOZEN_TESTS: DirtyDozenTestCase[] = [
     collection: 'erp_records',
     docId: 'Orders_ord3',
     operation: 'create',
-    auth: { uid: 'owner_1', email: 'shamim.usfba@gmail.com', email_verified: true },
+    auth: { uid: 'owner_1', email: 'shoukhinhd@gmail.com', email_verified: true },
     payload: {
       id: 'Orders_ord3',
       table: 'Orders',
