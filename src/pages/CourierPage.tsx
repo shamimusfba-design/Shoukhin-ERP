@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { apiUrl } from '../services/api';
 import { useErp } from '../context/ErpContext';
 import {
   Truck,
@@ -46,13 +47,13 @@ export const CourierPage: React.FC = () => {
   const unbookedOrders = erpState.Orders.filter((o) => !o.cid && !o.tracking);
   const bookedOrders = erpState.Orders.filter((o) => o.cid || o.tracking);
 
-  const callbackUrl = 'https://erp.shoukhinhd.com/api/steadfast/webhook';
+  const callbackUrl = 'https://api.erp.shoukhinhd.com/api/steadfast/webhook';
   const authToken = settings.sfWebhookToken || settings.sfSecret || 'tij9eaqybg07fndan7jniisz';
 
   const fetchWebhookEvents = useCallback(async () => {
     try {
       setLoadingEvents(true);
-      const res = await fetch('/api/steadfast/webhook/events');
+      const res = await fetch(apiUrl('/api/steadfast/webhook/events'));
       if (res.ok) {
         const json = await res.json();
         setWebhookEvents(json.events || []);
@@ -101,7 +102,7 @@ export const CourierPage: React.FC = () => {
         consignment_id: sampleOrder?.cid ? Number(sampleOrder.cid) : 9876543,
       };
 
-      const res = await fetch('/api/steadfast/webhook/test', {
+      const res = await fetch(apiUrl('/api/steadfast/webhook/test'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -119,7 +120,7 @@ export const CourierPage: React.FC = () => {
 
   const handleClearWebhookLogs = async () => {
     try {
-      await fetch('/api/steadfast/webhook/events', { method: 'DELETE' });
+      await fetch(apiUrl('/api/steadfast/webhook/events'), { method: 'DELETE' });
       setWebhookEvents([]);
       showToast('Webhook event log cleared.');
     } catch {
