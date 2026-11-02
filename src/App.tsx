@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { apiUrl } from './services/api';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
@@ -496,7 +497,7 @@ export default function App() {
     if (!settings.sfKey || !settings.sfSecret) {
       throw new Error('Save your Steadfast API Key & Secret in Settings first.');
     }
-    const res = await fetch('/api/steadfast', {
+    const res = await fetch(apiUrl('/api/steadfast'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
