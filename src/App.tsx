@@ -178,26 +178,7 @@ const EMPTY_DB: ErpDatabaseState = {
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [demoUser, setDemoUser] = useState<TeamMember | null>(() => {
-    try {
-      const saved = localStorage.getItem('shd_demo_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  const effectiveUser = useMemo(() => {
-    if (user) return user;
-    if (demoUser) {
-      return {
-        uid: demoUser.uid,
-        email: demoUser.email,
-        displayName: demoUser.displayName,
-      } as User;
-    }
-    return null;
-  }, [user, demoUser]);
+  const effectiveUser = user;
   const [authReady, setAuthReady] = useState(false);
   const [myProfile, setMyProfile] = useState<TeamMember | null>(null);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
@@ -299,22 +280,13 @@ export default function App() {
 
   // Firestore Real-time Sync Listener (with offline persistence & fallback to real data)
   useEffect(() => {
-    const active = user || demoUser;
-    if (!authReady && !active) {
+    if (!authReady && !user) {
       return;
     }
 
-    if (!active) {
+    if (!user) {
       setErpState(EMPTY_DB);
       setDataLoaded(false);
-      return;
-    }
-
-    // If logged in via Instant Owner demoUser (no Firebase Auth session)
-    if (!user && demoUser) {
-      const real = generateShoukhinDemoData(today);
-      setErpState((prev) => (prev.Products && prev.Products.length > 0 ? prev : { ...EMPTY_DB, ...real }));
-      setDataLoaded(true);
       return;
     }
 
@@ -417,7 +389,7 @@ export default function App() {
       unsubErp();
       unsubUsers();
     };
-  }, [authReady, user, demoUser, today]);
+  }, [authReady, user, today]);
 
   // Derived Business Computations
   const settings = useMemo(() => defaultSettings(erpState.Settings?.[0]), [erpState.Settings]);
@@ -682,7 +654,7 @@ export default function App() {
   };
 
   // Auth Gate Screen
-  if (!authReady && !demoUser) {
+  if (!authReady) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 p-6">
         <div className="flex items-center gap-3 text-sm font-medium">
@@ -711,19 +683,8 @@ export default function App() {
     }
   };
 
-  const handleInstantOwnerLogin = () => {
-    const prof = loginDemoOwner();
-    setDemoUser(prof);
-    setMyProfile(prof);
-    const real = generateShoukhinDemoData(today);
-    setErpState({ ...EMPTY_DB, ...real });
-    setDataLoaded(true);
-    showToast(`Welcome! Logged in as Owner (${OWNER_EMAIL})`);
-  };
-
   const handleSignOut = async () => {
     localStorage.removeItem('shd_demo_user');
-    setDemoUser(null);
     setMyProfile(null);
     await logoutUser();
   };
@@ -731,8 +692,6 @@ export default function App() {
   if (!effectiveUser) {
     return (
       <LoginPage
-        onInstantOwnerLogin={handleInstantOwnerLogin}
-        onGoogleLogin={handleGoogleLogin}
         showToast={showToast}
         busy={busy}
         setBusy={setBusy}

@@ -18,13 +18,10 @@ import {
   loginAdminWithEmail,
   requestAdminAccess,
   sendPasswordReset,
-  OWNER_EMAIL,
 } from '../firebase';
 import { PWAInstallButton } from './PWAInstallButton';
 
 interface LoginPageProps {
-  onInstantOwnerLogin: () => void;
-  onGoogleLogin: () => void;
   showToast: (msg: string) => void;
   busy: boolean;
   setBusy: (b: boolean) => void;
@@ -34,8 +31,6 @@ interface LoginPageProps {
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({
-  onInstantOwnerLogin,
-  onGoogleLogin,
   showToast,
   busy,
   setBusy,
@@ -150,9 +145,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
   return (
     <div className="relative min-h-screen flex flex-col justify-between text-slate-900 dark:text-slate-100 overflow-hidden font-sans">
-      {/* Background Image Layer with Blur */}
+      {/* Background Image Layer (Crisp and Clear, No Blur) */}
       <div
-        className="fixed inset-0 z-0 bg-cover bg-center transition-all duration-700 scale-105 pointer-events-none filter blur-[3px]"
+        className="fixed inset-0 z-0 bg-cover bg-center transition-all duration-700 pointer-events-none"
         style={{
           backgroundImage: "url('/login-bg.jpg')",
         }}
@@ -317,18 +312,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                       <span className="font-bold text-[#0e4d34] dark:text-emerald-400 hover:underline">
                         Request admin access
                       </span>
-                    </button>
-                  </div>
-
-                  {/* Instant Owner Access Shortcut */}
-                  <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800/80">
-                    <button
-                      type="button"
-                      onClick={onInstantOwnerLogin}
-                      className="w-full py-2.5 rounded-xl border border-emerald-500/30 bg-emerald-50/60 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300 text-xs font-semibold hover:bg-emerald-100/60 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <span>Instant Primary Admin Login</span>
-                      <span className="font-mono text-[10px] text-emerald-600/80">({OWNER_EMAIL})</span>
                     </button>
                   </div>
 
