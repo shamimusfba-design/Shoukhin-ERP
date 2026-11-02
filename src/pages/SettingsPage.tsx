@@ -291,7 +291,7 @@ export const SettingsPage: React.FC = () => {
                 Copy and paste this into Steadfast portal &quot;Callback URL&quot; (Never enter an email like shoukhinhd@gmail.com here):
               </p>
               <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-mono text-[11px] text-emerald-600 dark:text-emerald-400 break-all select-all">
-                https://erp.shoukhinhd.com/api/steadfast/webhook
+                https://api.erp.shoukhinhd.com/api/steadfast/webhook
               </div>
             </div>
 
