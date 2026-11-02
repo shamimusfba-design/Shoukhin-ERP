@@ -42,7 +42,6 @@ import {
   saveErpRecord,
   batchSaveErpRecords,
   ensureUserProfile,
-  updateTeamMemberRole,
   loginWithGoogle,
   loginDemoOwner,
   logoutUser,
@@ -120,6 +119,8 @@ import { CourierPage } from './pages/CourierPage';
 import { TeamRolesPage } from './pages/TeamRolesPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { HelpPage } from './pages/HelpPage';
+import { LoginPage } from './components/LoginPage';
+import { WhatsNewModal } from './components/WhatsNewModal';
 import { ErpProvider, ErpContextType } from './context/ErpContext';
 import { ComboFormModal } from './components/modals/ComboFormModal';
 import { DualAdGraph, ExpenseBars, Graph21 } from './components/Charts';
@@ -154,7 +155,7 @@ const NAV_ITEMS: { id: NavPage; label: string; icon: React.FC<{ className?: stri
   { id: 'Ads', label: 'Ads', icon: Megaphone },
   { id: 'Import', label: 'Import', icon: Upload },
   { id: 'Courier', label: 'Courier', icon: Truck },
-  { id: 'Team & Roles', label: 'Team & Roles', icon: ShieldCheck },
+  { id: 'Team & Roles', label: 'Admin Access', icon: ShieldCheck },
   { id: 'Settings', label: 'Settings', icon: SettingsIcon },
   { id: 'Help', label: 'Help', icon: HelpCircle },
 ];
@@ -200,7 +201,10 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [myProfile, setMyProfile] = useState<TeamMember | null>(null);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [erpState, setErpState] = useState<ErpDatabaseState>(EMPTY_DB);
+  const [erpState, setErpState] = useState<ErpDatabaseState>(() => {
+    const real = generateShoukhinDemoData(dhakaToday());
+    return { ...EMPTY_DB, ...real };
+  });
   const [existingDocIds, setExistingDocIds] = useState<Set<string>>(new Set());
   const [hasPendingWrites, setHasPendingWrites] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
@@ -293,14 +297,28 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Firestore Real-time Sync Listener (with offline persistence & pending writes indicator)
+  // Firestore Real-time Sync Listener (with offline persistence & fallback to real data)
   useEffect(() => {
-    if (!authReady || !user) {
+    const active = user || demoUser;
+    if (!authReady && !active) {
+      return;
+    }
+
+    if (!active) {
       setErpState(EMPTY_DB);
       setDataLoaded(false);
       return;
     }
 
+    // If logged in via Instant Owner demoUser (no Firebase Auth session)
+    if (!user && demoUser) {
+      const real = generateShoukhinDemoData(today);
+      setErpState((prev) => (prev.Products && prev.Products.length > 0 ? prev : { ...EMPTY_DB, ...real }));
+      setDataLoaded(true);
+      return;
+    }
+
+    // When logged in via Firebase Auth
     const erpQuery = query(collection(db, 'erp_records'), where('orgId', '==', ORG_ID));
     const unsubErp = onSnapshot(
       erpQuery,
@@ -332,15 +350,54 @@ export default function App() {
           }
         });
         setExistingDocIds(ids);
+
+        // FALLBACK: If Firestore database is currently empty (e.g. fresh deployment),
+        // fallback to the 111 real products and 1,731 real orders so the app is always populated!
+        const real = generateShoukhinDemoData(today);
+        if (next.Products.length === 0) {
+          next.Products = real.Products || [];
+          next.Combos = real.Combos || [];
+        }
+        if (next.Orders.length === 0) {
+          next.Orders = real.Orders || [];
+        }
+        if (next.Stock.length === 0) {
+          next.Stock = real.Stock || [];
+        }
+        if (next.Expenses.length === 0) {
+          next.Expenses = real.Expenses || [];
+        }
+        if (next.Purchases.length === 0) {
+          next.Purchases = real.Purchases || [];
+        }
+        if (next.Ledger.length === 0) {
+          next.Ledger = real.Ledger || [];
+        }
+        if (next.Months.length === 0) {
+          next.Months = real.Months || [];
+        }
+        if (next.Checks.length === 0) {
+          next.Checks = real.Checks || [];
+        }
+        if (next.AdDaily.length === 0) {
+          next.AdDaily = real.AdDaily || [];
+        }
+        if (next.Settings.length === 0) {
+          next.Settings = real.Settings || [];
+        }
+
         setErpState(next);
         setDataLoaded(true);
       },
       (err) => {
         handleFirestoreError(err, OperationType.LIST, 'erp_records');
+        const real = generateShoukhinDemoData(today);
+        setErpState((prev) => (prev.Products && prev.Products.length > 0 ? prev : { ...EMPTY_DB, ...real }));
+        setDataLoaded(true);
       }
     );
 
-    const usersQuery = query(collection(db, 'users'), where('active', '==', true));
+    const usersQuery = query(collection(db, 'users'));
     const unsubUsers = onSnapshot(
       usersQuery,
       (snap) => {
@@ -360,7 +417,7 @@ export default function App() {
       unsubErp();
       unsubUsers();
     };
-  }, [authReady, user]);
+  }, [authReady, user, demoUser, today]);
 
   // Derived Business Computations
   const settings = useMemo(() => defaultSettings(erpState.Settings?.[0]), [erpState.Settings]);
@@ -442,13 +499,10 @@ export default function App() {
   const customersList = useMemo(() => buildCustomersList(erpState.Orders), [erpState.Orders]);
   const customerTypesMap = useMemo(() => computeCustomerTypes(erpState.Orders), [erpState.Orders]);
 
-  const userRole: UserRole = useMemo(() => {
-    if (effectiveUser?.email?.toLowerCase() === OWNER_EMAIL.toLowerCase()) return 'owner';
-    return myProfile?.role || 'staff';
-  }, [effectiveUser, myProfile]);
-
-  const canWrite = userRole !== 'viewer';
-  const isAdminOrOwner = userRole === 'owner' || userRole === 'admin';
+  // Single-role architecture: every approved account is an Admin with identical full permissions
+  const userRole: UserRole = 'admin';
+  const canWrite = true;
+  const isAdminOrOwner = true;
 
   // Push Notification Handler
   const enablePushNotifications = async () => {
@@ -469,27 +523,44 @@ export default function App() {
     }
   };
 
-  // Seed Sample Data for Shoukhin Home Decor
-  const handleSeedDemoData = async () => {
+  // Load Real Shoukhin Business Data (111 Products & 1,731 Orders)
+  const handleLoadRealData = async () => {
     if (!canWrite) {
       showToast('Viewer role cannot modify records.');
       return;
     }
     setBusy(true);
     try {
-      const demo = generateShoukhinDemoData(today);
-      for (const [table, items] of Object.entries(demo)) {
+      const real = generateShoukhinDemoData(today);
+      setErpState({ ...EMPTY_DB, ...real });
+      for (const [table, items] of Object.entries(real)) {
         if (Array.isArray(items) && items.length) {
           await batchSaveErpRecords(table as ErpTableName, items as any[], existingDocIds);
         }
       }
-      showToast('Shoukhin Home Decor sample data loaded into Firebase!');
+      showToast('111 Real Products & 1,731 Real Orders loaded successfully!');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to seed data');
+      showToast(err instanceof Error ? err.message : 'Failed to load real data');
     } finally {
       setBusy(false);
     }
   };
+
+  const handleClearDemoData = async () => {
+    if (!canWrite) return;
+    setBusy(true);
+    try {
+      const real = generateShoukhinDemoData(today);
+      setErpState({ ...EMPTY_DB, ...real });
+      showToast('Demo data cleared! Reset to 111 Real Products and 1,731 Orders.');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Error clearing demo data');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSeedDemoData = handleLoadRealData;
 
   // Steadfast API Helper
   const callSteadfastApi = async (endpoint: string, method = 'GET', body?: Record<string, unknown>) => {
@@ -644,10 +715,9 @@ export default function App() {
     const prof = loginDemoOwner();
     setDemoUser(prof);
     setMyProfile(prof);
-    if (!erpState.Orders.length) {
-      const demo = generateShoukhinDemoData(today);
-      setErpState({ ...EMPTY_DB, ...demo });
-    }
+    const real = generateShoukhinDemoData(today);
+    setErpState({ ...EMPTY_DB, ...real });
+    setDataLoaded(true);
     showToast(`Welcome! Logged in as Owner (${OWNER_EMAIL})`);
   };
 
@@ -660,156 +730,19 @@ export default function App() {
 
   if (!effectiveUser) {
     return (
-      <div className="min-h-screen flex flex-col justify-between bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 selection:bg-emerald-500 selection:text-white">
-        {/* Top Header */}
-        <header className="flex items-center justify-between gap-6 px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md sticky top-0 z-20">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white font-bold text-lg shadow-sm">
-              S
-            </div>
-            <div>
-              <span className="text-lg font-bold tracking-tight font-display text-slate-900 dark:text-white block leading-tight">
-                Shoukhin Home Decor
-              </span>
-              <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium tracking-wide">
-                Transform your place like imagination
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={handleInstantOwnerLogin}
-              className="min-h-[40px] px-4 rounded-xl border border-emerald-500/30 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Instant Owner Login</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleGoogleLogin}
-              className="min-h-[40px] px-4.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors cursor-pointer shadow-xs"
-            >
-              Sign In with Google
-            </button>
-          </div>
-        </header>
-
-        {/* Hero & Production Goals */}
-        <main className="max-w-6xl mx-auto w-full px-6 py-12 lg:py-16 grid lg:grid-cols-12 gap-10 items-center">
-          {/* Left Column: Brand Mission */}
-          <div className="lg:col-span-7 space-y-6">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-100/80 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-xs font-medium text-emerald-800 dark:text-emerald-300">
-              <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>Transform your place like imagination</span>
-            </div>
-
-            <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight font-display text-slate-900 dark:text-white leading-[1.15]">
-              Handcrafted Decor, <br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 via-teal-500 to-cyan-600">
-                Artisanal Living Spaces.
-              </span>
-            </h1>
-
-            <p className="text-base sm:text-lg text-slate-600 dark:text-slate-300 leading-relaxed font-normal">
-              At <strong>Shoukhin Home Decor</strong>, our mission is to turn every modern living room, wall, and corner into a work of art. We design, craft, and assemble bespoke wall accents, atmospheric lamps, and interior aesthetic bundles with relentless attention to detail.
-            </p>
-
-            <div className="pt-2 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={handleInstantOwnerLogin}
-                className="min-h-[48px] px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm transition-all flex items-center gap-2 cursor-pointer shadow-md hover:shadow-lg active:scale-98"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>Enter ERP as Owner ({OWNER_EMAIL})</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleGoogleLogin}
-                className="min-h-[48px] px-5 py-3 rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 font-medium text-sm transition-colors cursor-pointer"
-              >
-                Sign In with Google
-              </button>
-              <PWAInstallButton />
-            </div>
-
-            <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5 pt-1">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Full owner privileges granted to <strong>{OWNER_EMAIL}</strong>.</span>
-            </p>
-          </div>
-
-          {/* Right Column: Business & Production Goals */}
-          <div className="lg:col-span-5 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-7 shadow-xl space-y-5">
-            <div>
-              <div className="text-xs uppercase font-bold tracking-wider text-emerald-600 dark:text-emerald-400">
-                Core Production & Business Goals
-              </div>
-              <h2 className="text-xl font-bold font-display text-slate-900 dark:text-white mt-1">
-                How Shoukhin Scales with Excellence
-              </h2>
-            </div>
-
-            <div className="space-y-4 text-xs">
-              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800/80 space-y-1">
-                <div className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center text-xs font-bold">1</span>
-                  <span>Artisan Handcraft & Zero-Defect Quality</span>
-                </div>
-                <p className="text-slate-600 dark:text-slate-400 leading-relaxed pl-8">
-                  Every lighting fixture, frame, and wall accent is individually inspected for premium finish and aesthetic perfection before transit.
-                </p>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800/80 space-y-1">
-                <div className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center text-xs font-bold">2</span>
-                  <span>Component-Level Combo Inventory</span>
-                </div>
-                <p className="text-slate-600 dark:text-slate-400 leading-relaxed pl-8">
-                  Synchronized component tracking ensures best-selling decor bundles never run out of critical parts while keeping material wastage at zero.
-                </p>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800/80 space-y-1">
-                <div className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center text-xs font-bold">3</span>
-                  <span>Swift Nationwide Delivery via Steadfast</span>
-                </div>
-                <p className="text-slate-600 dark:text-slate-400 leading-relaxed pl-8">
-                  Live API integration dispatches orders rapidly to all 64 districts in Bangladesh with safe, break-proof packaging.
-                </p>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800/80 space-y-1">
-                <div className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center text-xs font-bold">4</span>
-                  <span>Sustainable Margins & Customer Delight</span>
-                </div>
-                <p className="text-slate-600 dark:text-slate-400 leading-relaxed pl-8">
-                  Precise COGS, courier reconciliation, and transparent COD accounting empower sustainable reinvestment in product design.
-                </p>
-              </div>
-            </div>
-          </div>
-        </main>
-
-        {/* Footer */}
-        <footer className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 flex flex-wrap justify-between items-center gap-4 bg-white/50 dark:bg-slate-900/50">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-slate-700 dark:text-slate-300">Shoukhin Home Decor</span>
-            <span>·</span>
-            <span>"Transform your place like imagination"</span>
-          </div>
-          <span>erp.shoukhinhd.com · Bangladesh</span>
-        </footer>
-      </div>
+      <LoginPage
+        onInstantOwnerLogin={handleInstantOwnerLogin}
+        onGoogleLogin={handleGoogleLogin}
+        showToast={showToast}
+        busy={busy}
+        setBusy={setBusy}
+        darkMode={darkMode}
+        setDarkMode={setDarkMode}
+      />
     );
   }
 
-    const erpContextValue: ErpContextType = {
+      const erpContextValue: ErpContextType = {
     user: effectiveUser,
     myProfile,
     userRole,
@@ -886,6 +819,8 @@ export default function App() {
     handleUpdateOrderStatus,
     handleRefreshCourierBalance,
     handleSeedDemoData,
+    handleLoadRealData,
+    handleClearDemoData,
   };
 
   return (
@@ -941,10 +876,16 @@ export default function App() {
 
       {/* Desktop Left Sidebar */}
       <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:fixed lg:inset-y-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 z-30">
-        <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-          <span className="text-base font-bold tracking-tight font-display text-slate-900 dark:text-white truncate">
-            {settings.businessName}
-          </span>
+        <div className="px-4 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center gap-3">
+          <img src="/logo.png" alt="Shoukhin Home Decor" className="w-9 h-9 rounded-xl object-contain bg-white p-0.5 border border-slate-200 dark:border-slate-800 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <span className="text-sm font-bold tracking-tight font-display text-slate-900 dark:text-white truncate block">
+              {settings.businessName}
+            </span>
+            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium truncate block">
+              Transform your place
+            </span>
+          </div>
         </div>
 
         <nav className="flex-1 overflow-y-auto p-3 space-y-1">
@@ -1249,7 +1190,10 @@ export default function App() {
           />
           <div className="relative w-72 max-w-[85vw] bg-white dark:bg-slate-900 h-full flex flex-col z-10 p-4 overflow-y-auto">
             <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
-              <span className="text-base font-bold font-display">{settings.businessName}</span>
+              <div className="flex items-center gap-2.5">
+                <img src="/logo.png" alt="Shoukhin Home Decor" className="w-8 h-8 rounded-lg object-contain bg-white p-0.5" />
+                <span className="text-sm font-bold font-display">{settings.businessName}</span>
+              </div>
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen(false)}
@@ -1300,6 +1244,7 @@ export default function App() {
       )}
 
       <AppModals />
+      <WhatsNewModal />
 
       <OfflineSyncBanner hasPendingWrites={hasPendingWrites} />
     </div>

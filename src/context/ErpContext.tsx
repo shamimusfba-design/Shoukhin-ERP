@@ -120,6 +120,8 @@ export interface ErpContextType {
   handleUpdateOrderStatus: (order: OrderRecord) => Promise<void>;
   handleRefreshCourierBalance: () => Promise<void>;
   handleSeedDemoData: () => Promise<void>;
+  handleLoadRealData: () => Promise<void>;
+  handleClearDemoData: () => Promise<void>;
 }
 
 const ErpContext = createContext<ErpContextType | null>(null);

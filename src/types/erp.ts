@@ -1,4 +1,17 @@
-export type UserRole = 'owner' | 'admin' | 'manager' | 'staff' | 'viewer';
+// Extensible role structure: currently ONE role ('admin') with uniform full permissions
+export type UserRole = 'admin';
+export type UserStatus = 'pending' | 'approved' | 'rejected' | 'suspended';
+
+export interface AuditLogEntry {
+  id: string;
+  action: 'ADMIN_REQUESTED' | 'ADMIN_APPROVED' | 'ADMIN_REJECTED' | 'ADMIN_SUSPENDED' | 'ADMIN_REACTIVATED';
+  targetEmail: string;
+  targetUid: string;
+  targetName: string;
+  performedBy: string;
+  timestamp: string;
+  notes?: string;
+}
 
 export type OrderStatus =
   | 'Draft'
@@ -37,8 +50,14 @@ export interface TeamMember {
   uid: string;
   displayName: string;
   email: string;
-  role: UserRole;
+  role: 'admin';
+  status: UserStatus;
   active: boolean;
+  requestedAt?: string;
+  approvedAt?: string;
+  approvedBy?: string;
+  rejectedAt?: string;
+  rejectedBy?: string;
   updatedBy?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -107,6 +126,9 @@ export interface OrderRecord {
   lastSync?: string;
   syncError?: string;
   requestId?: string;
+  lastAttempt?: string;
+  updatedAt?: string;
+  raw?: Record<string, unknown>;
 }
 
 export interface ProductRecord {

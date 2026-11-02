@@ -1,5 +1,14 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as firebaseSignOut } from 'firebase/auth';
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut as firebaseSignOut,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile,
+  sendPasswordResetEmail,
+} from 'firebase/auth';
 import {
   initializeFirestore,
   getFirestore,
@@ -16,7 +25,7 @@ import {
   Firestore,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { ErpTableName, TeamMember, UserRole } from './types/erp';
+import { ErpTableName, TeamMember, UserRole, UserStatus, AuditLogEntry } from './types/erp';
 
 const app = initializeApp(firebaseConfig);
 const dbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
@@ -215,17 +224,17 @@ export async function ensureUserProfile(): Promise<TeamMember | null> {
   const uid = sanitizeDocId(user.uid);
   const userPath = `users/${uid}`;
   const userRef = doc(db, 'users', uid);
-
-  const isOwner = user.email.toLowerCase() === OWNER_EMAIL.toLowerCase();
-  const defaultRole: UserRole = isOwner ? 'owner' : 'staff';
-  const displayName = (user.displayName || user.email.split('@')[0] || 'Team Member').slice(0, 100);
+  const cleanEmail = user.email.toLowerCase().trim();
+  const isOwner = cleanEmail === OWNER_EMAIL.toLowerCase();
+  const displayName = (user.displayName || user.email.split('@')[0] || 'Admin').slice(0, 100);
 
   const fallbackProfile: TeamMember = {
     uid,
     displayName,
-    email: user.email.slice(0, 200),
-    role: defaultRole,
-    active: true,
+    email: cleanEmail,
+    role: 'admin',
+    status: isOwner ? 'approved' : 'pending',
+    active: isOwner ? true : false,
   };
 
   try {
@@ -233,34 +242,32 @@ export async function ensureUserProfile(): Promise<TeamMember | null> {
 
     if (snap.exists()) {
       const data = snap.data() as TeamMember;
-      if (isOwner) {
-        try {
-          const adminRef = doc(db, 'admins', uid);
-          const adminSnap = await getDoc(adminRef);
-          if (!adminSnap.exists()) {
-            await setDoc(adminRef, {
-              uid,
-              email: user.email.slice(0, 200),
-              role: 'owner',
-              createdAt: serverTimestamp(),
-            });
-          }
-        } catch (adminErr) {
-          console.warn('Could not ensure admin doc:', adminErr);
-        }
+      if (isOwner && (!data.active || data.status !== 'approved')) {
+        await updateDoc(userRef, {
+          role: 'admin',
+          status: 'approved',
+          active: true,
+          updatedAt: new Date().toISOString(),
+        });
+        data.role = 'admin';
+        data.status = 'approved';
+        data.active = true;
       }
       return data;
     }
 
-    const newProfile = {
+    const now = new Date().toISOString();
+    const newProfile: TeamMember = {
       uid,
       displayName,
-      email: user.email.slice(0, 200),
-      role: defaultRole,
-      active: true,
-      updatedBy: uid,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      email: cleanEmail,
+      role: 'admin',
+      status: isOwner ? 'approved' : 'pending',
+      active: isOwner ? true : false,
+      requestedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      ...(isOwner ? { approvedAt: now, approvedBy: 'system_bootstrap' } : {}),
     };
     await setDoc(userRef, newProfile);
 
@@ -268,59 +275,291 @@ export async function ensureUserProfile(): Promise<TeamMember | null> {
       try {
         await setDoc(doc(db, 'admins', uid), {
           uid,
-          email: user.email.slice(0, 200),
-          role: 'owner',
+          email: cleanEmail,
+          role: 'admin',
           createdAt: serverTimestamp(),
         });
       } catch (adminErr) {
-        console.warn('Could not set admin record:', adminErr);
+        console.warn('Could not ensure admin doc:', adminErr);
       }
     }
 
-    return fallbackProfile;
+    return newProfile;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, userPath);
     return fallbackProfile;
   }
 }
 
-export async function updateTeamMemberRole(
+export async function saveAuditLog(entry: Omit<AuditLogEntry, 'id' | 'timestamp'> & { id?: string; timestamp?: string }): Promise<void> {
+  const finalEntry: AuditLogEntry = {
+    id: entry.id || `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    action: entry.action,
+    targetEmail: entry.targetEmail,
+    targetUid: entry.targetUid,
+    targetName: entry.targetName,
+    performedBy: entry.performedBy,
+    timestamp: entry.timestamp || new Date().toISOString(),
+    notes: entry.notes || '',
+  };
+  try {
+    const docRef = doc(db, 'audit_logs', finalEntry.id);
+    await setDoc(docRef, finalEntry);
+  } catch (err) {
+    console.warn('Audit log write notice:', err);
+  }
+}
+
+export async function approveAdminRequest(
   targetMember: TeamMember,
-  role: UserRole,
-  active: boolean
+  performedByEmail: string
 ): Promise<void> {
   if (!auth.currentUser) throw new Error('Authentication required');
   const uid = sanitizeDocId(targetMember.uid);
-  const path = `users/${uid}`;
-  try {
-    await updateDoc(doc(db, 'users', uid), {
-      displayName: targetMember.displayName.slice(0, 100),
-      role,
-      active,
-      updatedBy: auth.currentUser.uid,
-      updatedAt: serverTimestamp(),
-    });
+  const now = new Date().toISOString();
+  await updateDoc(doc(db, 'users', uid), {
+    role: 'admin',
+    status: 'approved',
+    active: true,
+    approvedAt: now,
+    approvedBy: performedByEmail,
+    updatedBy: auth.currentUser.uid,
+    updatedAt: now,
+  });
 
+  try {
     const adminRef = doc(db, 'admins', uid);
-    const adminSnap = await getDoc(adminRef);
-    if (role === 'owner' || role === 'admin') {
-      if (adminSnap.exists()) {
-        await updateDoc(adminRef, {
-          role,
-          email: targetMember.email.slice(0, 200),
-        });
-      } else {
-        await setDoc(adminRef, {
+    await setDoc(adminRef, {
+      uid,
+      email: targetMember.email,
+      role: 'admin',
+      createdAt: serverTimestamp(),
+    });
+  } catch (e) {
+    console.warn('Admin record sync notice:', e);
+  }
+
+  await saveAuditLog({
+    action: 'ADMIN_APPROVED',
+    targetEmail: targetMember.email,
+    targetUid: targetMember.uid,
+    targetName: targetMember.displayName,
+    performedBy: performedByEmail,
+    notes: 'Approved account as Admin with full ERP access',
+  });
+}
+
+export async function rejectAdminRequest(
+  targetMember: TeamMember,
+  performedByEmail: string
+): Promise<void> {
+  if (!auth.currentUser) throw new Error('Authentication required');
+  const uid = sanitizeDocId(targetMember.uid);
+  const now = new Date().toISOString();
+  await updateDoc(doc(db, 'users', uid), {
+    status: 'rejected',
+    active: false,
+    rejectedAt: now,
+    rejectedBy: performedByEmail,
+    updatedBy: auth.currentUser.uid,
+    updatedAt: now,
+  });
+
+  try {
+    await deleteDoc(doc(db, 'admins', uid));
+  } catch {}
+
+  await saveAuditLog({
+    action: 'ADMIN_REJECTED',
+    targetEmail: targetMember.email,
+    targetUid: targetMember.uid,
+    targetName: targetMember.displayName,
+    performedBy: performedByEmail,
+    notes: 'Rejected admin access request',
+  });
+}
+
+export async function revokeOrSuspendAdmin(
+  targetMember: TeamMember,
+  allMembers: TeamMember[],
+  performedByEmail: string
+): Promise<void> {
+  if (!auth.currentUser) throw new Error('Authentication required');
+  const activeAdmins = allMembers.filter((m) => m.active && m.status === 'approved');
+  if (activeAdmins.length <= 1 && activeAdmins.some((m) => m.uid === targetMember.uid)) {
+    throw new Error('Action blocked: Cannot remove or suspend the last active Admin of the workspace.');
+  }
+
+  const uid = sanitizeDocId(targetMember.uid);
+  const now = new Date().toISOString();
+  await updateDoc(doc(db, 'users', uid), {
+    status: 'suspended',
+    active: false,
+    updatedBy: auth.currentUser.uid,
+    updatedAt: now,
+  });
+
+  try {
+    await deleteDoc(doc(db, 'admins', uid));
+  } catch {}
+
+  await saveAuditLog({
+    action: 'ADMIN_SUSPENDED',
+    targetEmail: targetMember.email,
+    targetUid: targetMember.uid,
+    targetName: targetMember.displayName,
+    performedBy: performedByEmail,
+    notes: 'Suspended admin account access',
+  });
+}
+
+export async function requestAdminAccess(
+  name: string,
+  email: string,
+  pass: string
+): Promise<{ success: boolean; isBootstrapped: boolean; message: string }> {
+  const cleanEmail = email.trim().toLowerCase();
+  const cred = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
+  const user = cred.user;
+  if (!user) throw new Error('Account creation failed');
+
+  try {
+    await updateProfile(user, { displayName: name });
+  } catch {}
+
+  const uid = sanitizeDocId(user.uid);
+  const isBootstrapped = cleanEmail === OWNER_EMAIL.toLowerCase();
+  const status: UserStatus = isBootstrapped ? 'approved' : 'pending';
+  const active: boolean = isBootstrapped ? true : false;
+  const now = new Date().toISOString();
+
+  const userRef = doc(db, 'users', uid);
+  const profile: TeamMember = {
+    uid,
+    displayName: name,
+    email: cleanEmail,
+    role: 'admin',
+    status,
+    active,
+    requestedAt: now,
+    createdAt: now,
+    updatedAt: now,
+    ...(isBootstrapped ? { approvedAt: now, approvedBy: 'system_bootstrap' } : {}),
+  };
+
+  await setDoc(userRef, profile);
+
+  if (isBootstrapped) {
+    try {
+      await setDoc(doc(db, 'admins', uid), {
+        uid,
+        email: cleanEmail,
+        role: 'admin',
+        createdAt: serverTimestamp(),
+      });
+    } catch {}
+  }
+
+  await saveAuditLog({
+    action: 'ADMIN_REQUESTED',
+    targetEmail: cleanEmail,
+    targetUid: uid,
+    targetName: name,
+    performedBy: cleanEmail,
+    notes: isBootstrapped ? 'Bootstrapped primary Admin' : 'Submitted new admin access request (Pending)',
+  });
+
+  // If pending, sign out immediately so they cannot access protected data
+  if (!isBootstrapped) {
+    await firebaseSignOut(auth);
+  }
+
+  return {
+    success: true,
+    isBootstrapped,
+    message: isBootstrapped
+      ? 'Primary Admin access established.'
+      : 'Access request submitted! An existing Admin must approve your request before you can sign in.',
+  };
+}
+
+export async function loginAdminWithEmail(
+  email: string,
+  pass: string
+): Promise<TeamMember> {
+  const cleanEmail = email.trim().toLowerCase();
+  const cred = await signInWithEmailAndPassword(auth, cleanEmail, pass);
+  const uid = sanitizeDocId(cred.user.uid);
+  const isOwner = cleanEmail === OWNER_EMAIL.toLowerCase();
+
+  const userRef = doc(db, 'users', uid);
+  const snap = await getDoc(userRef);
+
+  if (!snap.exists()) {
+    if (isOwner) {
+      const now = new Date().toISOString();
+      const profile: TeamMember = {
+        uid,
+        displayName: cred.user.displayName || 'Primary Admin',
+        email: cleanEmail,
+        role: 'admin',
+        status: 'approved',
+        active: true,
+        approvedAt: now,
+        approvedBy: 'system_bootstrap',
+        createdAt: now,
+        updatedAt: now,
+      };
+      await setDoc(userRef, profile);
+      try {
+        await setDoc(doc(db, 'admins', uid), {
           uid,
-          email: targetMember.email.slice(0, 200),
-          role,
+          email: cleanEmail,
+          role: 'admin',
           createdAt: serverTimestamp(),
         });
-      }
+      } catch {}
+      return profile;
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
+
+    await firebaseSignOut(auth);
+    throw new Error('Account record not found. Please request admin access first.');
   }
+
+  const profile = snap.data() as TeamMember;
+
+  if (isOwner && (!profile.active || profile.status !== 'approved')) {
+    profile.active = true;
+    profile.status = 'approved';
+    profile.role = 'admin';
+    await updateDoc(userRef, { active: true, status: 'approved', role: 'admin' });
+    try {
+      await setDoc(doc(db, 'admins', uid), { uid, email: cleanEmail, role: 'admin', createdAt: serverTimestamp() });
+    } catch {}
+    return profile;
+  }
+
+  if (profile.status === 'pending' || !profile.active) {
+    await firebaseSignOut(auth);
+    throw new Error('Account access requires admin approval. Your request is currently pending review by an active Admin.');
+  }
+
+  if (profile.status === 'rejected') {
+    await firebaseSignOut(auth);
+    throw new Error('Your admin access request has been rejected. Please contact an administrator.');
+  }
+
+  if (profile.status === 'suspended') {
+    await firebaseSignOut(auth);
+    throw new Error('Your admin account has been suspended. Please contact an active workspace administrator.');
+  }
+
+  return profile;
+}
+
+export async function sendPasswordReset(email: string): Promise<void> {
+  const cleanEmail = email.trim().toLowerCase();
+  await sendPasswordResetEmail(auth, cleanEmail);
 }
 
 export async function loginWithGoogle() {
@@ -350,9 +589,10 @@ export async function logoutUser() {
 export function loginDemoOwner(): TeamMember {
   const profile: TeamMember = {
     uid: 'owner_shoukhin_main',
-    displayName: 'Shoukhin Home Decor',
+    displayName: 'Shoukhin Home Decor (Admin)',
     email: OWNER_EMAIL,
-    role: 'owner',
+    role: 'admin',
+    status: 'approved',
     active: true,
   };
   localStorage.setItem('shd_demo_user', JSON.stringify(profile));

@@ -2,12 +2,71 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: admins
+    // Document ID: {adminId} (UID string, 1-128 chars, ^[a-zA-Z0-9_\-]+$)
+    // Fields:
+    //   - uid: string (required, 1-128 chars, immutable, matches adminId)
+    //   - email: string (required, 3-200 chars)
+    //   - role: string (required, 'admin' or 'owner')
+    //   - createdAt: timestamp or ISO string (required, immutable)
+    //
+    // Collection: users
+    // Document ID: {userId} (UID string, 1-128 chars, ^[a-zA-Z0-9_\-]+$)
+    // Fields:
+    //   - uid: string (required, 1-128 chars, immutable, matches userId)
+    //   - displayName: string (required, 1-100 chars)
+    //   - email: string (required, 3-200 chars)
+    //   - role: string (required, 'admin')
+    //   - status: string (required, 'pending' | 'approved' | 'rejected' | 'suspended')
+    //   - active: bool (required)
+    //   - requestedAt: string or timestamp (optional)
+    //   - approvedAt: string or timestamp (optional)
+    //   - approvedBy: string (optional, 1-200 chars)
+    //   - rejectedAt: string or timestamp (optional)
+    //   - rejectedBy: string (optional, 1-200 chars)
+    //   - updatedBy: string (optional, 1-128 chars)
+    //   - createdAt: string or timestamp (optional, immutable)
+    //   - updatedAt: string or timestamp (optional)
+    //
+    // Collection: audit_logs
+    // Document ID: {logId} (string, 1-128 chars, ^[a-zA-Z0-9_\-]+$)
+    // Fields:
+    //   - id: string (required, 1-128 chars, immutable, matches logId)
+    //   - action: string (required, enum: 'ADMIN_REQUESTED' | 'ADMIN_APPROVED' | 'ADMIN_REJECTED' | 'ADMIN_SUSPENDED' | 'ADMIN_REACTIVATED')
+    //   - targetEmail: string (required, 3-200 chars)
+    //   - targetUid: string (required, 1-128 chars, ^[a-zA-Z0-9_\-]+$)
+    //   - targetName: string (required, 1-100 chars)
+    //   - performedBy: string (required, 1-200 chars)
+    //   - timestamp: string or timestamp (required, 1-50 chars)
+    //   - notes: string (optional, max 1000 chars)
+    //
+    // Collection: erp_records
+    // Document ID: {recordId} (string, 1-128 chars, ^[a-zA-Z0-9_\-]+$)
+    // Fields:
+    //   - id: string (required, 1-128 chars, immutable, matches recordId)
+    //   - table: string (required, enum of ERP tables, immutable)
+    //   - orgId: string (required, 'shoukhin-hd', immutable)
+    //   - payload: map (required, max 60 keys)
+    //   - updatedBy: string (required, 1-128 chars, matches request.auth.uid)
+    //   - createdAt: timestamp (required, immutable, request.time)
+    //   - updatedAt: timestamp (required, request.time)
+    //
+    // ===============================================================
+
     // Pillar 1: Global Default-Deny Safety Net
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Core Primitives
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
     function isValidId(id) {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -28,44 +87,70 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.email_verified == true;
     }
 
-    function isBootstrappedOwner() {
+    function isBootstrappedAdmin() {
       return isVerifiedUser() && request.auth.token.email == 'shoukhinhd@gmail.com';
     }
 
-    function isAdmin() {
-      return isBootstrappedOwner() || (isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
-    }
-
-    function isStaffOrManager() {
-      return isAdmin() || (
-        isVerifiedUser() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['owner', 'admin', 'manager', 'staff']
+    function isApprovedAdmin() {
+      return isSignedIn() && (
+        isBootstrappedAdmin() ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'approved' &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true
+        )
       );
     }
 
-    // Validation Blueprints
+    function isAdmin() {
+      return isApprovedAdmin();
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
     function isValidAdminRecord(data) {
       return data.keys().hasAll(['uid', 'email', 'role', 'createdAt']) &&
         data.keys().hasOnly(['uid', 'email', 'role', 'createdAt']) &&
         data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
         data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
-        data.role in ['owner', 'admin', 'manager', 'staff', 'viewer'] &&
-        data.createdAt is timestamp;
+        data.role in ['admin', 'owner'] &&
+        (data.createdAt is timestamp || (data.createdAt is string && data.createdAt.size() <= 50));
     }
 
     function isValidUserProfile(data) {
-      return data.keys().hasAll(['uid', 'displayName', 'email', 'role', 'active', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['uid', 'displayName', 'email', 'role', 'active', 'updatedBy', 'createdAt', 'updatedAt']) &&
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'role', 'status', 'active']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'email', 'role', 'status', 'active', 'requestedAt', 'approvedAt', 'approvedBy', 'rejectedAt', 'rejectedBy', 'updatedBy', 'createdAt', 'updatedAt']) &&
         data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
         data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
         data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
-        data.role in ['owner', 'admin', 'manager', 'staff', 'viewer'] &&
+        data.role == 'admin' &&
+        data.status in ['pending', 'approved', 'rejected', 'suspended'] &&
         data.active is bool &&
+        (!('requestedAt' in data) || (data.requestedAt is string && data.requestedAt.size() <= 50) || data.requestedAt is timestamp) &&
+        (!('approvedAt' in data) || (data.approvedAt is string && data.approvedAt.size() <= 50) || data.approvedAt is timestamp) &&
+        (!('approvedBy' in data) || (data.approvedBy is string && data.approvedBy.size() <= 200)) &&
+        (!('rejectedAt' in data) || (data.rejectedAt is string && data.rejectedAt.size() <= 50) || data.rejectedAt is timestamp) &&
+        (!('rejectedBy' in data) || (data.rejectedBy is string && data.rejectedBy.size() <= 200)) &&
         (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128)) &&
-        data.createdAt is timestamp &&
-        data.updatedAt is timestamp;
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 50) || data.createdAt is timestamp) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 50) || data.updatedAt is timestamp);
+    }
+
+    function isValidAuditLogEntry(data) {
+      return data.keys().hasAll(['id', 'action', 'targetEmail', 'targetUid', 'targetName', 'performedBy', 'timestamp']) &&
+        data.keys().hasOnly(['id', 'action', 'targetEmail', 'targetUid', 'targetName', 'performedBy', 'timestamp', 'notes']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.action in ['ADMIN_REQUESTED', 'ADMIN_APPROVED', 'ADMIN_REJECTED', 'ADMIN_SUSPENDED', 'ADMIN_REACTIVATED'] &&
+        data.targetEmail is string && data.targetEmail.size() >= 3 && data.targetEmail.size() <= 200 &&
+        data.targetUid is string && data.targetUid.size() >= 1 && data.targetUid.size() <= 128 && data.targetUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.targetName is string && data.targetName.size() >= 1 && data.targetName.size() <= 100 &&
+        data.performedBy is string && data.performedBy.size() >= 1 && data.performedBy.size() <= 200 &&
+        (data.timestamp is timestamp || (data.timestamp is string && data.timestamp.size() >= 1 && data.timestamp.size() <= 50)) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000));
     }
 
     function isValidErpRecord(data) {
@@ -80,89 +165,94 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
     // 1. Admins Collection
     match /admins/{adminId} {
-      allow get: if isVerifiedUser() && isValidId(adminId) && (request.auth.uid == adminId || isAdmin());
-      allow list: if isVerifiedUser() && resource.data.uid == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(adminId) && (request.auth.uid == adminId || isApprovedAdmin());
+      allow list: if isApprovedAdmin();
 
-      allow create: if isVerifiedUser() &&
+      allow create: if isApprovedAdmin() &&
         isValidId(adminId) &&
         isValidAdminRecord(incoming()) &&
-        incoming().uid == adminId &&
-        incoming().createdAt == request.time &&
-        isAdmin();
+        incoming().uid == adminId;
 
-      allow update: if isVerifiedUser() &&
+      allow update: if isApprovedAdmin() &&
         isValidId(adminId) &&
         isValidAdminRecord(incoming()) &&
         incoming().uid == existing().uid &&
-        incoming().createdAt == existing().createdAt &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['role', 'email']) &&
-        isAdmin();
+        (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['role', 'email']);
 
-      allow delete: if isVerifiedUser() && isValidId(adminId) && isBootstrappedOwner();
+      allow delete: if isApprovedAdmin() && isValidId(adminId);
     }
 
-    // 2. Users Collection (Team & Multi-Role Management)
+    // 2. Users Collection (Team Management & Approval Lifecycle)
     match /users/{userId} {
-      allow get: if isVerifiedUser() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
-      allow list: if isVerifiedUser() && (resource.data.uid == request.auth.uid || resource.data.active == true);
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isApprovedAdmin());
+      allow list: if isApprovedAdmin();
 
-      allow create: if isVerifiedUser() &&
+      allow create: if isSignedIn() &&
         isValidId(userId) &&
         isValidUserProfile(incoming()) &&
         incoming().uid == userId &&
-        incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time &&
         (
           (
             request.auth.uid == userId &&
             incoming().email == request.auth.token.email &&
+            incoming().role == 'admin' &&
             (
-              (isBootstrappedOwner() && incoming().role == 'owner' && incoming().active == true) ||
-              (!isBootstrappedOwner() && incoming().role in ['staff', 'viewer'] && incoming().active == true)
+              (isBootstrappedAdmin() && incoming().status == 'approved' && incoming().active == true) ||
+              (!isBootstrappedAdmin() && incoming().status == 'pending' && incoming().active == false)
             )
           ) ||
-          isAdmin()
+          isApprovedAdmin()
         );
 
-      allow update: if isVerifiedUser() &&
+      allow update: if isApprovedAdmin() &&
         isValidId(userId) &&
         isValidUserProfile(incoming()) &&
         incoming().uid == existing().uid &&
-        incoming().createdAt == existing().createdAt &&
-        incoming().updatedAt == request.time &&
+        (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt);
+
+      allow delete: if isApprovedAdmin() && isValidId(userId);
+    }
+
+    // 3. Audit Logs Collection
+    match /audit_logs/{logId} {
+      allow read: if isApprovedAdmin();
+
+      allow create: if isSignedIn() &&
+        isValidId(logId) &&
+        isValidAuditLogEntry(incoming()) &&
+        incoming().id == logId &&
         (
+          isApprovedAdmin() ||
           (
-            request.auth.uid == userId &&
-            incoming().role == existing().role &&
-            incoming().active == existing().active &&
-            incoming().email == existing().email &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt', 'updatedBy'])
-          ) ||
-          (
-            isAdmin() &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'role', 'active', 'updatedAt', 'updatedBy'])
+            incoming().action == 'ADMIN_REQUESTED' &&
+            incoming().targetUid == request.auth.uid &&
+            incoming().targetEmail == request.auth.token.email
           )
         );
 
-      allow delete: if isVerifiedUser() && isValidId(userId) && isAdmin();
+      allow update, delete: if false;
     }
 
-    // 3. Unified ERP Records Collection
+    // 4. Unified ERP Records Collection
     match /erp_records/{recordId} {
-      allow get: if isVerifiedUser() && isValidId(recordId) && existing().orgId == 'shoukhin-hd';
-      allow list: if isVerifiedUser() && resource.data.orgId == 'shoukhin-hd';
+      allow get: if isApprovedAdmin() && isValidId(recordId) && resource.data.orgId == 'shoukhin-hd';
+      allow list: if isApprovedAdmin() && resource.data.orgId == 'shoukhin-hd';
 
-      allow create: if isVerifiedUser() &&
+      allow create: if isApprovedAdmin() &&
         isValidId(recordId) &&
         isValidErpRecord(incoming()) &&
         incoming().id == recordId &&
         incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time &&
-        isStaffOrManager();
+        incoming().updatedAt == request.time;
 
-      allow update: if isVerifiedUser() &&
+      allow update: if isApprovedAdmin() &&
         isValidId(recordId) &&
         isValidErpRecord(incoming()) &&
         incoming().id == existing().id &&
@@ -170,13 +260,11 @@ service cloud.firestore {
         incoming().orgId == existing().orgId &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['payload', 'updatedBy', 'updatedAt']) &&
-        isStaffOrManager();
+        incoming().diff(existing()).affectedKeys().hasOnly(['payload', 'updatedBy', 'updatedAt']);
 
-      allow delete: if isVerifiedUser() &&
+      allow delete: if isApprovedAdmin() &&
         isValidId(recordId) &&
-        existing().orgId == 'shoukhin-hd' &&
-        isAdmin();
+        resource.data.orgId == 'shoukhin-hd';
     }
   }
 }
