@@ -23,8 +23,8 @@ import { REAL_SHOUKHIN_ORDERS } from '../data/realOrders';
 export const V2_CONFIG = {
   version: '2.2.0',
   tz: 'Asia/Dhaka',
-  cutoff: '2026-09-01',
-  historicalRate: 15,
+  cutoff: '2026-11-01',
+  historicalRate: 20,
 };
 
 export const ORDER_STATUSES: OrderStatus[] = [
@@ -477,10 +477,21 @@ export function calculateOrderFinance(o: OrderRecord) {
   const estimatedCogs = sales !== null ? Math.round(sales * 0.52) : 0;
   const cogs = sold ? (missing ? estimatedCogs : facts.reduce((s, x) => s + (x.cogs || 0), 0)) : 0;
   const historical = o.date < V2_CONFIG.cutoff;
-  const known = isFinalStatus(o.status) && sales !== null;
+  const known = isFinalStatus(o.status) && (sales !== null || ['Cancelled', 'Returned'].includes(o.status));
   const gross = sales !== null && cogs !== null ? sales - cogs : null;
   const contribution = gross !== null ? gross - fee : null;
-  const estimate = historical && known ? (((sold ? sales : 0) - fee) * V2_CONFIG.historicalRate) / 100 : null;
+
+  // Historical profit: 20% on product sales (after deducting delivery charge) for delivered orders, minus full delivery fee lost on returns/cancellations
+  let estimate: number | null = null;
+  if (historical && known) {
+    if (sold && sales !== null) {
+      estimate = (Math.max(0, sales - fee) * V2_CONFIG.historicalRate) / 100;
+    } else if (['Cancelled', 'Returned'].includes(o.status)) {
+      estimate = -fee;
+    } else {
+      estimate = 0;
+    }
+  }
 
   return {
     sales,
@@ -823,6 +834,7 @@ interface StatBucket {
   returnQty: number;
   returnQtyUnknown: boolean;
   fees: number;
+  returnDeliveryLoss: number;
   gross: number | null;
   contribution: number;
   estimate: number;
@@ -864,6 +876,7 @@ function makeStatBucket(name: string): StatBucket {
     returnQty: 0,
     returnQtyUnknown: false,
     fees: 0,
+    returnDeliveryLoss: 0,
     gross: 0,
     contribution: 0,
     estimate: 0,
@@ -969,6 +982,10 @@ export function computeDashboardAnalytics(state: ErpDatabaseState, filter: Dashb
     ];
     if (stKey) g[stKey]++;
     else g.pending++;
+
+    if (['Cancelled', 'Returned'].includes(o.status)) {
+      g.returnDeliveryLoss += Number(f.fee || 0);
+    }
 
     if (['Delivered', 'Partial'].includes(o.status) && f.sales !== null) g.soldOrders++;
     if (o.status === 'Partial' && (!o.amountVerified || !o.itemsVerified)) g.partialUnverified++;

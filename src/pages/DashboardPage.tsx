@@ -333,6 +333,16 @@ export const DashboardPage: React.FC = () => {
                   </div>
                 </div>
 
+                <div className="rounded-2xl border border-rose-200 dark:border-rose-900/50 bg-rose-50/30 dark:bg-rose-950/20 p-4">
+                  <div className="text-xs text-rose-600 dark:text-rose-400 font-medium">Return Delivery Loss</div>
+                  <div className="text-xl sm:text-2xl font-bold font-mono text-rose-600 dark:text-rose-400 mt-1">
+                    -{formatMoney(dashboard.returnDeliveryLoss || 0)}
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                    {dashboard.returned + dashboard.cancelled} parcels · Lost courier charges
+                  </div>
+                </div>
+
                 <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
                   <div className="text-xs text-slate-500 dark:text-slate-400">Partial Delivery</div>
                   <div className="text-xl sm:text-2xl font-bold font-mono text-amber-600 dark:text-amber-400 mt-1">
@@ -565,6 +575,90 @@ export const DashboardPage: React.FC = () => {
                       { key: 'netValue', label: 'Net / estimate', color: 'green' },
                     ]}
                   />
+                </div>
+              </div>
+
+              {/* Month-by-Month Order & Profit Breakdown Table */}
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>মাসভিত্তিক পারফরম্যান্স ও প্রফিট সামারি (Monthly Summary)</span>
+                      <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
+                        অক্টোবর পর্যন্ত ডেলিভারি চার্জ বাদে ২০% এস্টিমেট
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      প্রতিটি মাসের মোট অর্ডার, ডেলিভারি, রিটার্নে লস হওয়া কুরিয়ার চার্জ এবং নিট প্রফিট
+                    </p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-800/40 font-medium">
+                        <th className="py-2.5 px-3">মাস (Month)</th>
+                        <th className="py-2.5 px-3 text-right">মোট অর্ডার</th>
+                        <th className="py-2.5 px-3 text-right">ডেলিভার্ড</th>
+                        <th className="py-2.5 px-3 text-right">ডেলিভার্ড সেলস</th>
+                        <th className="py-2.5 px-3 text-right">রিটার্ন/ক্যান্সেল</th>
+                        <th className="py-2.5 px-3 text-right text-rose-600 dark:text-rose-400">রিটার্নে লস কুরিয়ার ফি</th>
+                        <th className="py-2.5 px-3 text-center">হিসাবের ধরন</th>
+                        <th className="py-2.5 px-3 text-right text-emerald-600 dark:text-emerald-400 font-bold">নিট প্রফিট / এস্টিমেট</th>
+                        <th className="py-2.5 px-3 text-right font-medium">মার্জিন</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
+                      {dashboard.months
+                        .slice()
+                        .reverse()
+                        .map((m) => {
+                          const isModern = m.name >= '2026-11';
+                          const profit = m.historical ? m.estimate : (m.net ?? m.projectedNet ?? 0);
+                          const margin = m.sales && profit ? (profit / m.sales) * 100 : 0;
+                          return (
+                            <tr key={m.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                              <td className="py-2.5 px-3 font-sans font-semibold text-slate-900 dark:text-white whitespace-nowrap">
+                                {m.name}
+                              </td>
+                              <td className="py-2.5 px-3 text-right text-slate-700 dark:text-slate-300">
+                                {m.orders}
+                              </td>
+                              <td className="py-2.5 px-3 text-right text-emerald-600 dark:text-emerald-400">
+                                {m.delivered}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-medium text-slate-900 dark:text-white">
+                                {formatMoney(m.sales)}
+                              </td>
+                              <td className="py-2.5 px-3 text-right text-slate-500">
+                                {m.returned + m.cancelled}
+                              </td>
+                              <td className="py-2.5 px-3 text-right text-rose-600 dark:text-rose-400 font-medium">
+                                {m.returnDeliveryLoss ? `-${formatMoney(m.returnDeliveryLoss)}` : '৳0'}
+                              </td>
+                              <td className="py-2.5 px-3 text-center font-sans">
+                                {isModern ? (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-500/20 whitespace-nowrap">
+                                    Live Item Entry
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 whitespace-nowrap">
+                                    20% Rough Est.
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                                {formatMoney(profit)}
+                              </td>
+                              <td className="py-2.5 px-3 text-right text-slate-600 dark:text-slate-400">
+                                {margin ? `${margin.toFixed(1)}%` : '—'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
