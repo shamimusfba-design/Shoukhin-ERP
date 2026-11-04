@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { Search, Plus, Printer, Truck, ExternalLink, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Search, Plus, Printer, Truck, ExternalLink, RefreshCw, AlertTriangle, CheckCircle2, ClipboardPaste } from 'lucide-react';
+import { SteadfastPasteModal } from '../components/modals/SteadfastPasteModal';
+import { saveErpRecord } from '../firebase';
 import { useErp } from '../context/ErpContext';
 import { ORDER_STATUSES, formatMoney, calculateOrderFinance } from '../services/erpEngine';
 import { OrderRecord, OrderStatus } from '../types/erp';
@@ -16,6 +18,8 @@ export const OrdersPage: React.FC = () => {
     handleSyncAllSteadfastStatuses,
     handleDirectFetchConsignment,
     setPrintOrder,
+    setErpState,
+    showToast,
     busy,
   } = useErp();
 
@@ -24,6 +28,7 @@ export const OrdersPage: React.FC = () => {
   const [pendingProductsOnly, setPendingProductsOnly] = useState(false);
   const [orderOffset, setOrderOffset] = useState(0);
   const [directCode, setDirectCode] = useState('');
+  const [pasteModalOpen, setPasteModalOpen] = useState(false);
 
   const filteredOrdersList = useMemo(() => {
     const q = orderQuery.toLowerCase().trim();
@@ -107,6 +112,15 @@ export const OrdersPage: React.FC = () => {
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
                     <span>⚡ Auto-Sync Steadfast</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPasteModalOpen(true)}
+                    className="min-h-[42px] px-3.5 rounded-xl border border-blue-500/30 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 hover:bg-blue-100 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap transition-all"
+                  >
+                    <ClipboardPaste className="w-3.5 h-3.5" />
+                    <span>📋 বাল্ক পেস্ট করুন</span>
                   </button>
 
                   {canWrite && (
@@ -354,6 +368,24 @@ export const OrdersPage: React.FC = () => {
                   </button>
                 </div>
               </div>
-            </div>
+
+        {/* STEADFAST PASTE MODAL */}
+        {pasteModalOpen && (
+          <SteadfastPasteModal
+            onClose={() => setPasteModalOpen(false)}
+            onImport={async (incoming) => {
+              const mergedMap = new Map<string, OrderRecord>();
+              erpState.Orders.forEach((o) => mergedMap.set(o.cid || o.tracking || o.id, o));
+              incoming.forEach((o) => mergedMap.set(o.cid || o.tracking || o.id, o));
+              const nextList = Array.from(mergedMap.values());
+              setErpState((prev) => ({ ...prev, Orders: nextList }));
+              for (const ord of incoming) {
+                await saveErpRecord('Orders', ord);
+              }
+              showToast(`সফলভাবে ${incoming.length} টি অর্ডার ইআরপিতে যুক্ত করা হয়েছে!`);
+            }}
+          />
+        )}
+      </div>
   );
 };

@@ -45,6 +45,7 @@ export interface ErpContextType {
   isAdminOrOwner: boolean;
   teamMembers: TeamMember[];
   erpState: ErpDatabaseState;
+  setErpState: React.Dispatch<React.SetStateAction<ErpDatabaseState>>;
   existingDocIds: Set<string>;
   settings: SettingsRecord;
   catalog: CatalogItem[];
