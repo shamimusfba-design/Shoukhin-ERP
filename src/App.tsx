@@ -155,7 +155,6 @@ const NAV_ITEMS: { id: NavPage; label: string; icon: React.FC<{ className?: stri
   { id: 'Suggestions', label: 'Suggestions', icon: Lightbulb },
   { id: 'Customers', label: 'Customers', icon: Users },
   { id: 'Ads', label: 'Ads', icon: Megaphone },
-  { id: 'Import', label: 'Import', icon: Upload },
   { id: 'Courier', label: 'Courier', icon: Truck },
   { id: 'Team & Roles', label: 'Admin Access', icon: ShieldCheck },
   { id: 'Settings', label: 'Settings', icon: SettingsIcon },
@@ -889,7 +888,7 @@ export default function App() {
     }, 3000);
     const periodicTimer = setInterval(() => {
       handleSyncAllSteadfastStatuses().catch(() => {});
-    }, 120000);
+    }, 60000);
     return () => {
       clearTimeout(initialSyncTimer);
       clearInterval(periodicTimer);
