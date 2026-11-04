@@ -40,7 +40,7 @@ export const ImportPage: React.FC = () => {
               className="min-h-[42px] px-5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-2 cursor-pointer shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
             >
               <RefreshCw className={`w-4 h-4 ${busy ? 'animate-spin' : ''}`} />
-              <span>Load All 111 Real Products & 1,731 Orders</span>
+              <span>Load All 111 Real Products & 1,539 Orders</span>
             </button>
 
             <button
@@ -68,7 +68,7 @@ export const ImportPage: React.FC = () => {
             <ShoppingBag className="w-5 h-5 text-blue-600" />
             <div>
               <div className="text-[11px] text-slate-500">Steadfast Orders</div>
-              <div className="text-base font-bold font-mono text-slate-900 dark:text-white">1,731 Orders</div>
+              <div className="text-base font-bold font-mono text-slate-900 dark:text-white">{erpState.Orders.length || 1539} Orders</div>
             </div>
           </div>
 

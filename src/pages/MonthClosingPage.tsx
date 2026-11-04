@@ -33,13 +33,11 @@ export const MonthClosingPage: React.FC = () => {
             onChange={(ev) => setClosingMonth(ev.target.value)}
             className="min-h-[40px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono"
           >
-            {dashboard.options.months
-              .filter((m) => m >= '2026-09')
-              .map((m) => (
-                <option key={m} value={m}>
-                  {monthLabel(m)} ({m})
-                </option>
-              ))}
+            {(dashboard.options.months.length > 0 ? dashboard.options.months : [today.slice(0, 7)]).map((m) => (
+              <option key={m} value={m}>
+                {monthLabel(m)} ({m})
+              </option>
+            ))}
           </select>
         </div>
 

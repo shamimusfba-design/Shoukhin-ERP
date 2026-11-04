@@ -13,7 +13,7 @@ import {
   AlertTriangle,
   Clock,
 } from 'lucide-react';
-import { formatMoney, normalizeStatus } from '../services/erpEngine';
+import { formatMoney, normalizeStatus, APP_CURRENCY } from '../services/erpEngine';
 import { SteadfastWebhookEvent, OrderRecord } from '../types/erp';
 import { saveErpRecord } from '../firebase';
 
@@ -37,6 +37,8 @@ export const CourierPage: React.FC = () => {
   const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
   const [copiedToken, setCopiedToken] = useState<boolean>(false);
   const [testBusy, setTestBusy] = useState<boolean>(false);
+  const [fetchInput, setFetchInput] = useState<string>('');
+  const [fetchingDirect, setFetchingDirect] = useState<boolean>(false);
 
   const isMock =
     !settings.sfKey ||
@@ -87,6 +89,129 @@ export const CourierPage: React.FC = () => {
       setTimeout(() => setCopiedToken(false), 2500);
     } catch {
       showToast(authToken);
+    }
+  };
+
+  const handleDirectFetchFromSteadfast = async () => {
+    if (!fetchInput.trim()) {
+      showToast('Enter at least one Consignment ID or Tracking Code');
+      return;
+    }
+    setFetchingDirect(true);
+    setCourierOutput('Connecting to Steadfast Courier API (portal.packzy.com)...');
+    try {
+      // Parse IDs separated by comma, space, or newline
+      const ids = fetchInput
+        .split(/[\s,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      if (!ids.length) {
+        showToast('No valid IDs found');
+        return;
+      }
+
+      let successCount = 0;
+      let skippedCount = 0;
+      const results: string[] = [];
+
+      for (const id of ids) {
+        try {
+          const isTracking = /^[A-Za-z]/.test(id);
+          const endpoint = isTracking
+            ? `/status_by_trackingcode/${encodeURIComponent(id)}`
+            : `/status_by_cid/${encodeURIComponent(id)}`;
+
+          // Direct fetch from Steadfast API
+          const res = await fetch(`https://portal.packzy.com/api/v1${endpoint}`, {
+            headers: {
+              'Api-Key': (settings.sfKey || '').trim(),
+              'Secret-Key': (settings.sfSecret || '').trim(),
+              'Content-Type': 'application/json',
+            },
+          });
+
+          if (!res.ok) {
+            results.push(`[ID ${id}]: Not found or invalid API credentials (${res.status})`);
+            skippedCount++;
+            continue;
+          }
+
+          const data = await res.json();
+          if (data.status === 200 || data.delivery_status) {
+            const deliveryStatus = data.delivery_status || 'Pending';
+            const normalized = normalizeStatus(deliveryStatus);
+
+            // Find existing order or create a new order
+            const existing = erpState.Orders.find(
+              (o) => o.cid === id || o.tracking === id || o.invoice === id
+            );
+
+            if (existing) {
+              const updated: OrderRecord = {
+                ...existing,
+                status: normalized,
+                rawStatus: deliveryStatus,
+                lastSync: new Date().toISOString(),
+                dispatched: true,
+                revision: (existing.revision || 1) + 1,
+              };
+              await saveErpRecord('Orders', updated);
+              results.push(`[Updated] Consignment ${id} -> ${normalized}`);
+            } else {
+              // Create new direct order from Steadfast consignment
+              const newOrder: OrderRecord = {
+                id: 'ORD-SF-' + id,
+                invoice: id,
+                cid: isTracking ? undefined : id,
+                tracking: isTracking ? id : undefined,
+                name: 'Steadfast Customer (' + id + ')',
+                phone: '01700000000',
+                address: 'Bangladesh',
+                district: 'Dhaka',
+                date: new Date().toISOString().slice(0, 10),
+                status: normalized,
+                rawStatus: deliveryStatus,
+                total: 0,
+                cod: 0,
+                shippingCharge: 0,
+                codCharge: 0,
+                returnCharge: 0,
+                paymentStatus: 'Unpaid',
+                note: 'Imported via Steadfast Direct API',
+                createdAt: new Date().toISOString(),
+                stockReturns: {},
+                stockReserved: false,
+                source: 'Steadfast Direct API',
+                lines: [],
+                dispatched: true,
+                lastSync: new Date().toISOString(),
+                revision: 1,
+                imported: true,
+                amountVerified: true,
+                itemsVerified: true,
+              };
+              await saveErpRecord('Orders', newOrder);
+              results.push(`[Imported Direct] Consignment ${id} -> Created in ERP with status ${normalized}`);
+            }
+            successCount++;
+          } else {
+            results.push(`[ID ${id}]: ${data.message || 'Status unavailable'}`);
+            skippedCount++;
+          }
+        } catch (itemErr: any) {
+          results.push(`[ID ${id}]: Error ${itemErr.message}`);
+          skippedCount++;
+        }
+      }
+
+      setCourierOutput(results.join('\n'));
+      showToast(`Direct Ingest: ${successCount} synced, ${skippedCount} skipped.`);
+      setFetchInput('');
+    } catch (err: any) {
+      showToast(err.message || 'Direct fetch failed');
+    } finally {
+      setFetchingDirect(false);
     }
   };
 
@@ -243,6 +368,47 @@ export const CourierPage: React.FC = () => {
               : 'Tap to check'}
           </div>
           <p className="text-[11px] text-slate-500">Requestable cash from Steadfast</p>
+        </div>
+      </div>
+
+      {/* DIRECT STEADFAST COURIER AUTO-FETCH (NO EXCEL/CSV NEEDED) */}
+      <div className="rounded-2xl border-2 border-emerald-500/30 dark:border-emerald-500/20 bg-emerald-50/40 dark:bg-emerald-950/20 p-6 space-y-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-emerald-600 text-white shadow-xs">
+              <Zap className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white font-display">
+                কুরিয়ার ডিরেক্ট অটো-এন্ট্রি (No CSV/Excel Export-Import Required)
+              </h3>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                Steadfast এন্ট্রি করা অর্ডারের Consignment ID বা Tracking Code দিন - সরাসরি কুরিয়ার API থেকে ডাটা চলে আসবে, কোনো এক্সেল ফাইল ডাউনলোড/আপলোডের ঝামেলা নেই!
+              </p>
+            </div>
+          </div>
+          <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
+            100% Direct API
+          </span>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-3">
+          <input
+            type="text"
+            value={fetchInput}
+            onChange={(e) => setFetchInput(e.target.value)}
+            placeholder="Consignment ID বা Tracking Codes দিন (যেমন: 202500132, 202500133 বা SF1234567)"
+            className="flex-1 min-h-[44px] px-3.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          />
+          <button
+            type="button"
+            disabled={fetchingDirect || !fetchInput.trim()}
+            onClick={handleDirectFetchFromSteadfast}
+            className="min-h-[44px] px-6 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs whitespace-nowrap transition-all"
+          >
+            <RefreshCw className={`w-4 h-4 ${fetchingDirect ? 'animate-spin' : ''}`} />
+            <span>{fetchingDirect ? 'ফেচ হচ্ছে...' : 'ডিরেক্ট ফেচ ও এন্ট্রি করুন'}</span>
+          </button>
         </div>
       </div>
 
@@ -503,8 +669,8 @@ export const CourierPage: React.FC = () => {
                         )}
                       </td>
                       <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300 font-mono text-[11px] whitespace-nowrap">
-                        {ev.cod_amount ? `৳${ev.cod_amount}` : ''}
-                        {ev.delivery_charge ? ` (Fee: ৳${ev.delivery_charge})` : ''}
+                        {ev.cod_amount ? `${APP_CURRENCY}${ev.cod_amount}` : ''}
+                        {ev.delivery_charge ? ` (Fee: ${APP_CURRENCY}${ev.delivery_charge})` : ''}
                       </td>
                       <td className="py-2.5 px-3 text-slate-500 text-[11px] max-w-xs truncate">
                         {ev.tracking_message || '—'}

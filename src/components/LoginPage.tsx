@@ -20,6 +20,7 @@ import {
   sendPasswordReset,
 } from '../firebase';
 import { PWAInstallButton } from './PWAInstallButton';
+import { isDemoMode } from '../services/erpEngine';
 
 interface LoginPageProps {
   showToast: (msg: string) => void;
@@ -28,6 +29,7 @@ interface LoginPageProps {
   darkMode: boolean;
   setDarkMode: (fn: (prev: boolean) => boolean) => void;
   onLoginSuccess?: () => void;
+  onDemoLogin?: (demoUser: { email: string; displayName: string }) => void;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({
@@ -36,12 +38,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   setBusy,
   darkMode,
   setDarkMode,
+  onDemoLogin,
 }) => {
   const [view, setView] = useState<'signin' | 'request' | 'submitted'>('signin');
 
   // Sign In Form State
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState(() => isDemoMode ? 'demo@apexerp.com' : '');
+  const [password, setPassword] = useState(() => isDemoMode ? 'Demo@2026' : '');
   const [showPass, setShowPass] = useState(false);
 
   // Request Access Form State (Collects ONLY: full name, email, password, confirm password)
@@ -67,6 +70,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     if (!password) {
       showToast('Please enter your password.');
       return;
+    }
+
+    if (isDemoMode) {
+      if (email.trim().toLowerCase() === 'demo@apexerp.com' && password === 'Demo@2026') {
+        onDemoLogin?.({ email: 'demo@apexerp.com', displayName: 'Enterprise Demo Admin' });
+        showToast('Signed in to OmniFlow Commercial Demo.');
+        return;
+      } else {
+        setStatusAlert('Invalid demo credentials. Use: demo@apexerp.com / Demo@2026');
+        showToast('Invalid demo credentials.');
+        return;
+      }
     }
 
     setBusy(true);
@@ -162,16 +177,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         <header className="px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img
-              src="/logo.png"
-              alt="Shoukhin Home Decor Logo"
+              src={isDemoMode ? '/logo.png' : '/logo.png'}
+              alt={isDemoMode ? 'OmniFlow Global ERP' : 'Shoukhin Home Decor Logo'}
               className="w-10 h-10 object-contain rounded-xl bg-white/90 p-1 shadow-sm"
             />
             <div className="hidden sm:block">
               <span className="text-sm font-bold tracking-tight text-white drop-shadow-md">
-                Shoukhin Home Decor
+                {isDemoMode ? 'OmniFlow Commercial ERP' : 'Shoukhin Home Decor'}
               </span>
               <span className="text-[11px] text-white/80 block drop-shadow-xs">
-                Live the place you love
+                {isDemoMode ? 'Next-Gen Enterprise Management' : 'Live the place you love'}
               </span>
             </div>
           </div>
@@ -201,10 +216,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 <div className="w-1 h-7 rounded-full bg-[#0e4d34]" />
                 <div>
                   <div className="text-xs font-extrabold tracking-wider text-slate-800 dark:text-slate-100 uppercase font-mono">
-                    SHOUKHIN ERP
+                    {isDemoMode ? 'OMNIFLOW ENTERPRISE' : 'SHOUKHIN ERP'}
                   </div>
                   <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                    Enterprise Resource Planning
+                    {isDemoMode ? 'Global Commercial Management Platform' : 'Enterprise Resource Planning'}
                   </div>
                 </div>
               </div>
@@ -299,21 +314,34 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   </form>
 
                   {/* Request Admin Access Link */}
-                  <div className="text-center pt-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setStatusAlert(null);
-                        setView('request');
-                      }}
-                      className="text-xs text-slate-600 dark:text-slate-300 cursor-pointer"
-                    >
-                      <span>New user? </span>
-                      <span className="font-bold text-[#0e4d34] dark:text-emerald-400 hover:underline">
-                        Request admin access
-                      </span>
-                    </button>
-                  </div>
+                  {!isDemoMode && (
+                    <div className="text-center pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStatusAlert(null);
+                          setView('request');
+                        }}
+                        className="text-xs text-slate-600 dark:text-slate-300 cursor-pointer"
+                      >
+                        <span>New user? </span>
+                        <span className="font-bold text-[#0e4d34] dark:text-emerald-400 hover:underline">
+                          Request admin access
+                        </span>
+                      </button>
+                    </div>
+                  )}
+
+                  {isDemoMode && (
+                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center">
+                      <div className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                        Interactive Demo Access Credentials
+                      </div>
+                      <div className="text-[11px] font-mono text-emerald-700/90 dark:text-emerald-400 mt-0.5">
+                        Email: <b>demo@apexerp.com</b> | Pass: <b>Demo@2026</b>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Bottom Notice */}
                   <div className="space-y-4 pt-1">

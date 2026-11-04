@@ -118,6 +118,8 @@ export interface ErpContextType {
   // Actions
   handleBookSteadfastOrder: (order: OrderRecord) => Promise<void>;
   handleUpdateOrderStatus: (order: OrderRecord) => Promise<void>;
+  handleSyncAllSteadfastStatuses: () => Promise<void>;
+  handleDirectFetchConsignment: (codeOrCid: string) => Promise<void>;
   handleRefreshCourierBalance: () => Promise<void>;
   handleSeedDemoData: () => Promise<void>;
   handleLoadRealData: () => Promise<void>;

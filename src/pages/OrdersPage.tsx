@@ -13,13 +13,17 @@ export const OrdersPage: React.FC = () => {
     setOrderModal,
     handleBookSteadfastOrder,
     handleUpdateOrderStatus,
+    handleSyncAllSteadfastStatuses,
+    handleDirectFetchConsignment,
     setPrintOrder,
+    busy,
   } = useErp();
 
   const [orderQuery, setOrderQuery] = useState('');
   const [orderStatusFilter, setOrderStatusFilter] = useState('');
   const [pendingProductsOnly, setPendingProductsOnly] = useState(false);
   const [orderOffset, setOrderOffset] = useState(0);
+  const [directCode, setDirectCode] = useState('');
 
   const filteredOrdersList = useMemo(() => {
     const q = orderQuery.toLowerCase().trim();
@@ -94,25 +98,65 @@ export const OrdersPage: React.FC = () => {
                   <span>Product assignment pending</span>
                 </label>
 
-                {canWrite && (
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() =>
-                      setOrderModal({
-                        date: today,
-                        status: 'Confirmed',
-                        source: 'Facebook',
-                        paymentStatus: 'Unpaid',
-                        returnCharge: 0,
-                        lines: [],
-                      })
-                    }
-                    className="min-h-[42px] px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+                    disabled={busy}
+                    onClick={handleSyncAllSteadfastStatuses}
+                    className="min-h-[42px] px-3.5 rounded-xl border border-emerald-500/30 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap transition-all disabled:opacity-50"
                   >
-                    <Plus className="w-4 h-4" />
-                    <span>New Order</span>
+                    <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
+                    <span>⚡ Auto-Sync Steadfast</span>
                   </button>
-                )}
+
+                  {canWrite && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOrderModal({
+                          date: today,
+                          status: 'Confirmed',
+                          source: 'Facebook',
+                          paymentStatus: 'Unpaid',
+                          returnCharge: 0,
+                          lines: [],
+                        })
+                      }
+                      className="min-h-[42px] px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>New Order</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Quick Ingest Bar for New Courier Orders */}
+              <div className="rounded-2xl border border-emerald-500/20 bg-emerald-50/30 dark:bg-emerald-950/20 p-3 flex flex-col sm:flex-row items-center gap-2.5 text-xs">
+                <span className="font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap flex items-center gap-1.5">
+                  <Truck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>কুরিয়ার থেকে সরাসরি অর্ডার যোগ করুন:</span>
+                </span>
+                <div className="flex-1 flex gap-2 w-full sm:w-auto">
+                  <input
+                    type="text"
+                    value={directCode}
+                    onChange={(e) => setDirectCode(e.target.value)}
+                    placeholder="Steadfast Tracking Code বা Consignment ID দিন (যেমন SFR261008... বা 306145501)"
+                    className="flex-1 min-h-[36px] px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs text-slate-900 dark:text-white placeholder:text-slate-400"
+                  />
+                  <button
+                    type="button"
+                    disabled={busy || !directCode.trim()}
+                    onClick={async () => {
+                      await handleDirectFetchConsignment(directCode);
+                      setDirectCode('');
+                    }}
+                    className="min-h-[36px] px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-medium whitespace-nowrap cursor-pointer shadow-xs transition-colors"
+                  >
+                    Fetch & Add
+                  </button>
+                </div>
               </div>
 
               <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
@@ -236,14 +280,11 @@ export const OrdersPage: React.FC = () => {
                               {o.lastSync ? 'Synced ' + new Date(o.lastSync).toLocaleDateString() : 'Manual'}
                             </div>
                           </td>
-                          <td className="py-2.5 px-4 text-right font-mono text-slate-600 dark:text-slate-300">
-                            {o.finance.reason ||
-                              formatMoney(o.finance.historical ? o.finance.estimate : o.finance.gross)}
+                          <td className="py-2.5 px-4 text-right font-mono font-medium text-slate-700 dark:text-slate-300">
+                            {formatMoney(o.finance.gross !== null ? o.finance.gross : o.finance.estimate)}
                           </td>
-                          <td className="py-2.5 px-4 text-right font-mono text-slate-600 dark:text-slate-300">
-                            {o.finance.historical
-                              ? '—'
-                              : o.finance.reason || formatMoney(o.finance.contribution)}
+                          <td className="py-2.5 px-4 text-right font-mono font-medium text-emerald-600 dark:text-emerald-400">
+                            {formatMoney(o.finance.contribution !== null ? o.finance.contribution : o.finance.estimate)}
                           </td>
                           <td className="py-2.5 px-4 text-right whitespace-nowrap space-x-1.5">
                             <button

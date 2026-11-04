@@ -102,17 +102,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   console.warn(`[Firestore ${operationType} Notice (${path || 'root'})]:`, errInfo.error);
 }
 
-// Validate connection to Firestore on boot
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
-    }
-  }
-}
-testConnection();
+// Firestore ready
 
 // Sanitize ID to match ^[a-zA-Z0-9_\-]+$ and maxLength 128
 export function sanitizeDocId(rawId: string): string {
@@ -132,7 +122,52 @@ function stripUndefined<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj));
 }
 
+
+function saveLocalDemoRecord<T extends { id: string }>(table: ErpTableName, item: T): void {
+  try {
+    const raw = localStorage.getItem('omniflow_demo_db');
+    const dbData = raw ? JSON.parse(raw) : {};
+    const list = Array.isArray(dbData[table]) ? dbData[table] : [];
+    const idx = list.findIndex((x) => x.id === item.id || (table === 'Products' && (x as any).sku === (item as any).sku));
+    if (idx >= 0) {
+      list[idx] = item;
+    } else {
+      list.unshift(item);
+    }
+    dbData[table] = list;
+    localStorage.setItem('omniflow_demo_db', JSON.stringify(dbData));
+    window.dispatchEvent(new CustomEvent('omniflow_demo_updated', { detail: { table, item } }));
+  } catch (e) {
+    console.warn('Local demo store notice:', e);
+  }
+}
+
+function deleteLocalDemoRecord(table: ErpTableName, itemId: string): void {
+  try {
+    const raw = localStorage.getItem('omniflow_demo_db');
+    if (!raw) return;
+    const dbData = JSON.parse(raw);
+    if (Array.isArray(dbData[table])) {
+      dbData[table] = dbData[table].filter((x) => x.id !== itemId && x.sku !== itemId);
+      localStorage.setItem('omniflow_demo_db', JSON.stringify(dbData));
+      window.dispatchEvent(new CustomEvent('omniflow_demo_updated', { detail: { table } }));
+    }
+  } catch (e) {
+    console.warn('Local demo store delete notice:', e);
+  }
+}
+
 export async function saveErpRecord<T extends { id: string }>(table: ErpTableName, item: T): Promise<T> {
+  const isDemo = typeof window !== 'undefined' && (
+    window.location.hostname.includes('apex-erp-demo') ||
+    window.location.hostname.includes('demo') ||
+    window.location.search.includes('demo=true')
+  );
+  if (isDemo) {
+    saveLocalDemoRecord(table, item);
+    return item;
+  }
+
   if (!auth.currentUser) throw new Error('Please sign in to save changes.');
   const docId = makeErpDocId(table, item.id);
   const path = `erp_records/${docId}`;
@@ -208,6 +243,16 @@ export async function batchSaveErpRecords<T extends { id: string }>(
 }
 
 export async function deleteErpRecord(table: ErpTableName, itemId: string): Promise<void> {
+  const isDemo = typeof window !== 'undefined' && (
+    window.location.hostname.includes('apex-erp-demo') ||
+    window.location.hostname.includes('demo') ||
+    window.location.search.includes('demo=true')
+  );
+  if (isDemo) {
+    deleteLocalDemoRecord(table, itemId);
+    return;
+  }
+
   if (!auth.currentUser) throw new Error('Please sign in.');
   const docId = makeErpDocId(table, itemId);
   const path = `erp_records/${docId}`;

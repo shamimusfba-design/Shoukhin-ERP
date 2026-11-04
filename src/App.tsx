@@ -124,6 +124,8 @@ import { WhatsNewModal } from './components/WhatsNewModal';
 import { ErpProvider, ErpContextType } from './context/ErpContext';
 import { ComboFormModal } from './components/modals/ComboFormModal';
 import { DualAdGraph, ExpenseBars, Graph21 } from './components/Charts';
+import { isDemoMode, APP_CURRENCY } from './services/erpEngine';
+import { generateOmniFlowDemoData } from './data/omniFlowData';
 
 type NavPage =
   | 'Dashboard'
@@ -178,13 +180,51 @@ const EMPTY_DB: ErpDatabaseState = {
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const effectiveUser = user;
+  const [demoSession, setDemoSession] = useState<{ email: string; displayName: string } | null>(() => {
+    if (!isDemoMode) return null;
+    try {
+      const saved = localStorage.getItem('omniflow_demo_session');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const effectiveUser = useMemo(() => {
+    if (user) return user;
+    if (isDemoMode && demoSession) {
+      return {
+        uid: 'demo_admin_uid',
+        email: demoSession.email,
+        displayName: demoSession.displayName,
+      } as User;
+    }
+    return null;
+  }, [user, demoSession]);
+
   const [authReady, setAuthReady] = useState(false);
   const [myProfile, setMyProfile] = useState<TeamMember | null>(null);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [erpState, setErpState] = useState<ErpDatabaseState>(() => {
+    if (isDemoMode) {
+      try {
+        const saved = localStorage.getItem('omniflow_demo_db');
+        if (saved) return JSON.parse(saved);
+      } catch {}
+      return generateOmniFlowDemoData();
+    }
     const real = generateShoukhinDemoData(dhakaToday());
-    return { ...EMPTY_DB, ...real };
+    const initUniqueMap = new Map<string, OrderRecord>();
+    for (const ord of (real.Orders || [])) {
+      const ordKey = ord.cid || ord.tracking || ord.id;
+      if (!initUniqueMap.has(ordKey)) {
+        initUniqueMap.set(ordKey, {
+          ...ord,
+          status: ord.status === 'Unknown' ? 'Pending' : ord.status,
+        });
+      }
+    }
+    return { ...EMPTY_DB, ...real, Orders: Array.from(initUniqueMap.values()) };
   });
   const [existingDocIds, setExistingDocIds] = useState<Set<string>>(new Set());
   const [hasPendingWrites, setHasPendingWrites] = useState(false);
@@ -206,10 +246,10 @@ export default function App() {
 
   const today = useMemo(() => dhakaToday(), []);
 
-  // Dashboard Filter State
-  const [quickDate, setQuickDate] = useState('This Month');
+  // Dashboard Filter State: Default to 'All Time' so all 1,539 historical orders and delivered revenue appear immediately!
+  const [quickDate, setQuickDate] = useState('All Time');
   const [selectedMonth, setSelectedMonth] = useState('');
-  const [startDate, setStartDate] = useState(() => today.slice(0, 7) + '-01');
+  const [startDate, setStartDate] = useState('2025-08-01');
   const [endDate, setEndDate] = useState(() => today);
   const [districtFilter, setDistrictFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -280,6 +320,20 @@ export default function App() {
 
   // Firestore Real-time Sync Listener (with offline persistence & fallback to real data)
   useEffect(() => {
+    if (isDemoMode) {
+      setDataLoaded(true);
+      const handleDemoUpdate = () => {
+        try {
+          const raw = localStorage.getItem('omniflow_demo_db');
+          if (raw) setErpState(JSON.parse(raw));
+        } catch {}
+      };
+      window.addEventListener('omniflow_demo_updated', handleDemoUpdate);
+      return () => {
+        window.removeEventListener('omniflow_demo_updated', handleDemoUpdate);
+      };
+    }
+
     if (!authReady && !user) {
       return;
     }
@@ -324,7 +378,7 @@ export default function App() {
         setExistingDocIds(ids);
 
         // FALLBACK: If Firestore database is currently empty (e.g. fresh deployment),
-        // fallback to the 111 real products and 1,731 real orders so the app is always populated!
+        // fallback to the 111 real products and 1,539 real orders so the app is always populated!
         const real = generateShoukhinDemoData(today);
         if (next.Products.length === 0) {
           next.Products = real.Products || [];
@@ -333,6 +387,18 @@ export default function App() {
         if (next.Orders.length === 0) {
           next.Orders = real.Orders || [];
         }
+        // Deduplicate orders so an order never appears twice
+        const uniqueOrdersMap = new Map<string, OrderRecord>();
+        for (const ord of next.Orders) {
+          const ordKey = ord.cid || ord.tracking || ord.id;
+          if (!uniqueOrdersMap.has(ordKey)) {
+            uniqueOrdersMap.set(ordKey, {
+              ...ord,
+              status: ord.status === 'Unknown' ? 'Pending' : ord.status,
+            });
+          }
+        }
+        next.Orders = Array.from(uniqueOrdersMap.values());
         if (next.Stock.length === 0) {
           next.Stock = real.Stock || [];
         }
@@ -495,7 +561,7 @@ export default function App() {
     }
   };
 
-  // Load Real Shoukhin Business Data (111 Products & 1,731 Orders)
+  // Load Real Shoukhin Business Data (111 Products & 1,539 Orders)
   const handleLoadRealData = async () => {
     if (!canWrite) {
       showToast('Viewer role cannot modify records.');
@@ -510,7 +576,7 @@ export default function App() {
           await batchSaveErpRecords(table as ErpTableName, items as any[], existingDocIds);
         }
       }
-      showToast('111 Real Products & 1,731 Real Orders loaded successfully!');
+      showToast('111 Real Products & 1,539 Real Orders loaded successfully!');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to load real data');
     } finally {
@@ -524,7 +590,7 @@ export default function App() {
     try {
       const real = generateShoukhinDemoData(today);
       setErpState({ ...EMPTY_DB, ...real });
-      showToast('Demo data cleared! Reset to 111 Real Products and 1,731 Orders.');
+      showToast('Demo data cleared! Reset to 111 Real Products and 1,539 Orders.');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Error clearing demo data');
     } finally {
@@ -534,27 +600,86 @@ export default function App() {
 
   const handleSeedDemoData = handleLoadRealData;
 
-  // Steadfast API Helper
+  // Steadfast API Helper (with native CORS to portal.packzy.com & mock sandbox support)
   const callSteadfastApi = async (endpoint: string, method = 'GET', body?: Record<string, unknown>) => {
+    const isMock =
+      !settings.sfKey ||
+      settings.sfKey.toLowerCase().includes('mock') ||
+      settings.sfKey.toLowerCase().includes('demo') ||
+      settings.sfSecret?.toLowerCase().includes('mock');
+
+    const cleanPath = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+    if (isMock) {
+      if (cleanPath === '/get_balance') {
+        return { status: 200, current_balance: 41634 };
+      }
+      if (cleanPath.startsWith('/status_by_')) {
+        return { status: 200, delivery_status: 'delivered' };
+      }
+      if (cleanPath === '/create_order') {
+        const randCid = Math.floor(1000000 + Math.random() * 9000000);
+        return {
+          status: 200,
+          consignment: {
+            consignment_id: randCid,
+            tracking_code: 'SF' + randCid,
+            status: 'in_review',
+          },
+        };
+      }
+    }
+
     if (!settings.sfKey || !settings.sfSecret) {
       throw new Error('Save your Steadfast API Key & Secret in Settings first.');
     }
-    const res = await fetch('/api/steadfast', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        endpoint,
-        method,
-        sfKey: settings.sfKey,
-        sfSecret: settings.sfSecret,
-        body,
-      }),
-    });
-    const json = await res.json();
-    if (!res.ok || !json.ok) {
-      throw new Error(json.error || 'Steadfast API request failed');
+
+    // Direct fetch to Steadfast Packzy API (supports native browser CORS)
+    try {
+      const fetchOpts: RequestInit = {
+        method: method.toUpperCase(),
+        headers: {
+          'Api-Key': settings.sfKey.trim(),
+          'Secret-Key': settings.sfSecret.trim(),
+          'Content-Type': 'application/json',
+        },
+      };
+      if (body && method.toUpperCase() !== 'GET') {
+        fetchOpts.body = JSON.stringify(body);
+      }
+      const direct = await fetch(`https://portal.packzy.com/api/v1${cleanPath}`, fetchOpts);
+      if (direct.ok) {
+        const dJson = await direct.json();
+        if (dJson.status === 200 || dJson.status === '200') return dJson;
+        if (dJson.message) throw new Error(dJson.message);
+      }
+    } catch (e: any) {
+      if (e?.message && !e.message.includes('fetch')) {
+        throw e;
+      }
     }
-    return json.data;
+
+    // Fallback to proxy
+    try {
+      const res = await fetch('/api/steadfast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: cleanPath,
+          method,
+          sfKey: settings.sfKey,
+          sfSecret: settings.sfSecret,
+          body,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        throw new Error(json.error || 'Steadfast API request failed');
+      }
+      return json.data;
+    } catch (proxyErr) {
+      throw new Error(proxyErr instanceof Error ? proxyErr.message : 'Steadfast request failed');
+    }
   };
 
   const handleRefreshCourierBalance = async () => {
@@ -584,9 +709,9 @@ export default function App() {
     }
     setBusy(true);
     try {
-      const endpoint = order.cid
-        ? `/status_by_cid/${encodeURIComponent(order.cid)}`
-        : `/status_by_trackingcode/${encodeURIComponent(order.tracking!)}`;
+      const endpoint = order.tracking
+        ? `/status_by_trackingcode/${encodeURIComponent(order.tracking)}`
+        : `/status_by_cid/${encodeURIComponent(order.cid!)}`;
       const r = await callSteadfastApi(endpoint, 'GET');
       if (!r.delivery_status) throw new Error('Delivery status absent in Steadfast response');
       const nextStatus = normalizeStatus(r.delivery_status);
@@ -597,10 +722,15 @@ export default function App() {
         lastSync: new Date().toISOString(),
         dispatched:
           order.dispatched || ['Delivered', 'Partial', 'Shipped', 'Returned'].includes(nextStatus),
+        deliveredAt: nextStatus === 'Delivered' ? (order.deliveredAt || new Date().toISOString()) : order.deliveredAt,
         revision: (order.revision || 1) + 1,
       };
+      setErpState((prev) => ({
+        ...prev,
+        Orders: prev.Orders.map((o) => (o.id === order.id ? updatedOrder : o)),
+      }));
       await saveErpRecord('Orders', updatedOrder);
-      showToast(`Order ${order.invoice}: ${nextStatus}`);
+      showToast(`Order ${order.name || order.invoice}: ${nextStatus}`);
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err));
     } finally {
@@ -608,15 +738,161 @@ export default function App() {
     }
   };
 
+  const handleSyncAllSteadfastStatuses = async () => {
+    const activeOrders = erpState.Orders.filter(
+      (o) => (o.cid || o.tracking) && !['Delivered', 'Cancelled'].includes(o.status)
+    );
+    if (!activeOrders.length) {
+      showToast('All active orders are up to date!');
+      return;
+    }
+    setBusy(true);
+    let updatedCount = 0;
+    try {
+      const updatedList = [...erpState.Orders];
+      for (const ord of activeOrders.slice(0, 40)) {
+        try {
+          const endpoint = ord.tracking
+            ? `/status_by_trackingcode/${encodeURIComponent(ord.tracking)}`
+            : `/status_by_cid/${encodeURIComponent(ord.cid!)}`;
+          const res = await callSteadfastApi(endpoint, 'GET');
+          if (res?.delivery_status) {
+            const nextStatus = normalizeStatus(res.delivery_status);
+            if (ord.status !== nextStatus) {
+              const idx = updatedList.findIndex((x) => x.id === ord.id);
+              if (idx >= 0) {
+                const up: OrderRecord = {
+                  ...updatedList[idx],
+                  status: nextStatus,
+                  rawStatus: String(res.delivery_status),
+                  lastSync: new Date().toISOString(),
+                  deliveredAt: nextStatus === 'Delivered' ? (updatedList[idx].deliveredAt || new Date().toISOString()) : updatedList[idx].deliveredAt,
+                  revision: (updatedList[idx].revision || 1) + 1,
+                };
+                updatedList[idx] = up;
+                await saveErpRecord('Orders', up);
+                updatedCount++;
+              }
+            }
+          }
+        } catch {
+          // ignore single item network hiccup
+        }
+      }
+      setErpState((prev) => ({ ...prev, Orders: updatedList }));
+      showToast(`⚡ Steadfast Sync: ${updatedCount} order(s) updated to latest status!`);
+    } catch (err: any) {
+      showToast(err.message || 'Sync failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDirectFetchConsignment = async (rawCode: string) => {
+    const trimmed = rawCode.trim();
+    if (!trimmed) {
+      showToast('Please enter a Tracking Code or Consignment ID');
+      return;
+    }
+    setBusy(true);
+    try {
+      const isTracking = /^[A-Za-z]/.test(trimmed);
+      const endpoint = isTracking
+        ? `/status_by_trackingcode/${encodeURIComponent(trimmed)}`
+        : `/status_by_cid/${encodeURIComponent(trimmed)}`;
+      const res = await callSteadfastApi(endpoint, 'GET');
+      if (!res?.delivery_status && !res?.status) {
+        throw new Error('Consignment not found in Steadfast');
+      }
+      const deliveryStatus = res.delivery_status || 'Pending';
+      const normStatus = normalizeStatus(deliveryStatus);
+
+      const existing = erpState.Orders.find(
+        (o) => o.tracking === trimmed || o.cid === trimmed || o.invoice === trimmed
+      );
+
+      if (existing) {
+        const up: OrderRecord = {
+          ...existing,
+          status: normStatus,
+          rawStatus: deliveryStatus,
+          lastSync: new Date().toISOString(),
+          deliveredAt: normStatus === 'Delivered' ? (existing.deliveredAt || new Date().toISOString()) : existing.deliveredAt,
+          revision: (existing.revision || 1) + 1,
+        };
+        setErpState((prev) => ({
+          ...prev,
+          Orders: prev.Orders.map((o) => (o.id === existing.id ? up : o)),
+        }));
+        await saveErpRecord('Orders', up);
+        showToast(`Updated existing Order ${existing.name || existing.invoice}: ${normStatus}`);
+      } else {
+        const newOrder: OrderRecord = {
+          id: 'ORD-SF-' + trimmed,
+          invoice: trimmed,
+          cid: isTracking ? undefined : trimmed,
+          tracking: isTracking ? trimmed : undefined,
+          name: 'Steadfast Customer (' + trimmed + ')',
+          phone: '01700000000',
+          address: 'Bangladesh',
+          district: 'Dhaka',
+          date: new Date().toISOString().slice(0, 10),
+          status: normStatus,
+          rawStatus: deliveryStatus,
+          total: 0,
+          cod: 0,
+          shippingCharge: 0,
+          codCharge: 0,
+          returnCharge: 0,
+          paymentStatus: 'Unpaid',
+          note: 'Direct import from Steadfast Courier',
+          createdAt: new Date().toISOString(),
+          stockReturns: {},
+          stockReserved: false,
+          source: 'Steadfast Direct API',
+          lines: [],
+          dispatched: true,
+          lastSync: new Date().toISOString(),
+          revision: 1,
+          imported: true,
+          amountVerified: true,
+          itemsVerified: true,
+        };
+        setErpState((prev) => ({
+          ...prev,
+          Orders: [newOrder, ...prev.Orders],
+        }));
+        await saveErpRecord('Orders', newOrder);
+        showToast(`Imported new parcel from Steadfast: ${normStatus}!`);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to fetch consignment');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Auto-sync active orders from Steadfast on mount and periodically
+  useEffect(() => {
+    if (!settings.sfKey || !settings.sfSecret) return;
+    const initialSyncTimer = setTimeout(() => {
+      handleSyncAllSteadfastStatuses().catch(() => {});
+    }, 3000);
+    const periodicTimer = setInterval(() => {
+      handleSyncAllSteadfastStatuses().catch(() => {});
+    }, 120000);
+    return () => {
+      clearTimeout(initialSyncTimer);
+      clearInterval(periodicTimer);
+    };
+  }, [settings.sfKey, settings.sfSecret]);
+
   const handleBookSteadfastOrder = async (order: OrderRecord) => {
     if (order.cid || order.tracking) {
       showToast('Order already linked to Steadfast tracking ' + (order.tracking || order.cid));
       return;
     }
-    if (!order.lines?.length) {
-      showToast('Assign at least one product or combo before booking.');
-      return;
-    }
+    // If order has no line items, fallback to note without blocking booking
     if (!/^01\d{9}$/.test(order.phone)) {
       showToast('Steadfast requires a valid 11-digit Bangladesh phone number (01XXXXXXXXX).');
       return;
@@ -684,9 +960,30 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
+    if (isDemoMode) {
+      localStorage.removeItem('omniflow_demo_session');
+      setDemoSession(null);
+      setMyProfile(null);
+      return;
+    }
     localStorage.removeItem('shd_demo_user');
     setMyProfile(null);
     await logoutUser();
+  };
+
+  const handleDemoLogin = (sess: { email: string; displayName: string }) => {
+    localStorage.setItem('omniflow_demo_session', JSON.stringify(sess));
+    setDemoSession(sess);
+    const prof: TeamMember = {
+      uid: 'demo_admin_uid',
+      displayName: sess.displayName,
+      email: sess.email,
+      role: 'admin',
+      status: 'approved',
+      active: true,
+    };
+    setMyProfile(prof);
+    setDataLoaded(true);
   };
 
   if (!effectiveUser) {
@@ -697,6 +994,7 @@ export default function App() {
         setBusy={setBusy}
         darkMode={darkMode}
         setDarkMode={setDarkMode}
+        onDemoLogin={handleDemoLogin}
       />
     );
   }
@@ -776,6 +1074,8 @@ export default function App() {
     setPrintOrder,
     handleBookSteadfastOrder,
     handleUpdateOrderStatus,
+    handleSyncAllSteadfastStatuses,
+    handleDirectFetchConsignment,
     handleRefreshCourierBalance,
     handleSeedDemoData,
     handleLoadRealData,
@@ -836,13 +1136,13 @@ export default function App() {
       {/* Desktop Left Sidebar */}
       <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:fixed lg:inset-y-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 z-30">
         <div className="px-4 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center gap-3">
-          <img src="/logo.png" alt="Shoukhin Home Decor" className="w-9 h-9 rounded-xl object-contain bg-white p-0.5 border border-slate-200 dark:border-slate-800 shrink-0" />
+          <img src="/logo.png" alt={isDemoMode ? 'OmniFlow ERP' : 'Shoukhin Home Decor'} className="w-9 h-9 rounded-xl object-contain bg-white p-0.5 border border-slate-200 dark:border-slate-800 shrink-0" />
           <div className="min-w-0 flex-1">
             <span className="text-sm font-bold tracking-tight font-display text-slate-900 dark:text-white truncate block">
-              {settings.businessName}
+              {isDemoMode ? 'OmniFlow Global ERP' : settings.businessName}
             </span>
             <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium truncate block">
-              Transform your place
+              {isDemoMode ? 'Commercial Enterprise Edition' : 'Transform your place'}
             </span>
           </div>
         </div>
@@ -909,6 +1209,11 @@ export default function App() {
             <span className="text-base font-bold tracking-tight font-display text-slate-900 dark:text-white whitespace-nowrap shrink-0">
               {page}
             </span>
+            {isDemoMode && (
+              <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-500/20">
+                Interactive Commercial Demo (USD $)
+              </span>
+            )}
           </div>
 
           <nav className="hidden xl:flex items-center gap-6 text-xs font-medium text-slate-600 dark:text-slate-400">

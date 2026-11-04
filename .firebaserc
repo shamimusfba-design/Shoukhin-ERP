@@ -1,5 +1,18 @@
 {
   "projects": {
     "default": "gen-lang-client-0373015650"
-  }
+  },
+  "targets": {
+    "gen-lang-client-0373015650": {
+      "hosting": {
+        "main": [
+          "gen-lang-client-0373015650"
+        ],
+        "demo": [
+          "apex-erp-demo"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

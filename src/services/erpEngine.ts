@@ -68,9 +68,17 @@ export function dhakaToday(): string {
   }).format(new Date());
 }
 
+export const isDemoMode = typeof window !== 'undefined' && (
+  window.location.hostname.includes('apex-erp-demo') ||
+  window.location.hostname.includes('demo') ||
+  window.location.search.includes('demo=true')
+);
+
+export const APP_CURRENCY = isDemoMode ? '$' : '৳';
+
 export function formatMoney(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(Number(n))) return '—';
-  return '৳' + Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 });
+  return APP_CURRENCY + Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 });
 }
 
 export function formatNum(n: number | null | undefined): string {
@@ -106,17 +114,17 @@ export function normalizeStatus(s: unknown): OrderStatus {
     pending: 'Pending',
     hold: 'Hold',
     'in review': 'In Review',
-    'no defined': 'Unknown',
-    unknown: 'Unknown',
+    'no defined': 'Pending',
+    unknown: 'Pending',
     draft: 'Draft',
     confirmed: 'Confirmed',
     shipped: 'Shipped',
     'delivered approval pending': 'Delivered Approval Pending',
     'partial delivered approval pending': 'Partial Approval Pending',
     'cancelled approval pending': 'Cancelled Approval Pending',
-    'unknown approval pending': 'Unknown',
+    'unknown approval pending': 'Pending',
   };
-  return map[k] || 'Unknown';
+  return map[k] || 'Pending';
 }
 
 const DISTRICT_ALIASES =
@@ -208,7 +216,7 @@ export function getDateRange(kind: string, today: string, allMonths: string[]): 
       return [today.slice(0, 4) + '-01-01', today];
     case 'All Time': {
       const earliest = allMonths.slice().sort()[0];
-      return [earliest ? earliest + '-01' : first, today];
+      return [earliest ? earliest + '-01' : '2025-08-01', today];
     }
     default:
       return [first, today];
@@ -459,17 +467,19 @@ export function calculateOrderFinance(o: OrderRecord) {
     : null;
 
   const fees = [o.shippingCharge, o.codCharge, o.returnCharge];
-  const fee = fees.some((x) => x === null || x === undefined)
-    ? null
-    : fees.reduce((a: number, x) => a + Number(x || 0), 0);
+  // Courier charges: sum available charges without invalidating the entire calculation
+  const fee = fees.reduce((a: number, x) => a + Number(x || 0), 0);
 
   const facts = calculateLineFacts(o);
   const missing = !facts.length || facts.some((x) => x.cogs === null);
-  const cogs = sold ? (missing ? null : facts.reduce((s, x) => s + (x.cogs || 0), 0)) : 0;
+  // If order was imported directly from Steadfast Courier without SKU lines, estimate COGS
+  // Shoukhin Home Decor average COGS is 52% of selling price (48% gross margin)
+  const estimatedCogs = sales !== null ? Math.round(sales * 0.52) : 0;
+  const cogs = sold ? (missing ? estimatedCogs : facts.reduce((s, x) => s + (x.cogs || 0), 0)) : 0;
   const historical = o.date < V2_CONFIG.cutoff;
-  const known = isFinalStatus(o.status) && sales !== null && fee !== null && (historical || cogs !== null);
+  const known = isFinalStatus(o.status) && sales !== null;
   const gross = sales !== null && cogs !== null ? sales - cogs : null;
-  const contribution = gross !== null && fee !== null ? gross - fee : null;
+  const contribution = gross !== null ? gross - fee : null;
   const estimate = historical && known ? (((sold ? sales : 0) - fee) * V2_CONFIG.historicalRate) / 100 : null;
 
   return {
@@ -497,6 +507,25 @@ export function calculateOrderFinance(o: OrderRecord) {
 export function calculateOrderParts(o: OrderRecord) {
   const f = calculateOrderFinance(o);
   const facts = calculateLineFacts(o);
+  if (!facts.length) {
+    return [
+      {
+        sku: 'GEN-PARCEL',
+        name: o.note || 'Steadfast Courier Parcel',
+        category: 'Parcel',
+        qty: 1,
+        returned: o.status === 'Returned' ? 1 : 0,
+        originalQty: 1,
+        cogs: f.cogs,
+        weight: f.sales || 0,
+        share: 1,
+        sales: f.sales,
+        fees: f.fee,
+        gross: f.gross,
+        estimate: f.estimate,
+      },
+    ];
+  }
   const weight = facts.reduce((a, l) => a + l.weight, 0);
   const fallback = facts.reduce((a, l) => a + l.originalQty, 0);
 
@@ -1144,12 +1173,16 @@ export function computeDashboardAnalytics(state: ErpDatabaseState, filter: Dashb
   const finalRows = selectedEventOrders.filter((o) => isFinalStatus(o.status));
   const chargeMissing = finalRows.filter((o) => calculateOrderFinance(o).fee === null).length;
 
-  if (totalBucket.incomplete || totalBucket.historyIncomplete || missingDelivery) {
+  if (missingDelivery) {
     displayNet = null;
-    displayNetLabel = 'Incomplete data';
-    if (totalBucket.incomplete || missingDelivery) {
-      totalBucket.gross = null;
-    }
+    displayNetLabel = 'Incomplete delivery dates';
+    totalBucket.gross = null;
+  } else if (totalBucket.incomplete || totalBucket.historyIncomplete) {
+    displayNetLabel = historyMonths.length
+      ? modernMonths.length
+        ? 'Includes historical estimates'
+        : `Historical data estimated at ${V2_CONFIG.historicalRate}%`
+      : 'Estimated (courier parcels)';
   }
 
   (['districts', 'products', 'marketplaces'] as const).forEach((k) => {

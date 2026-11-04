@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Download, Smartphone, WifiOff, RefreshCw, X } from 'lucide-react';
 import { usePWAInstall, useOnlineStatus } from '../hooks/usePWAInstall';
 
@@ -80,20 +80,31 @@ export const PWAInstallButton: React.FC = () => {
 
 export const OfflineSyncBanner: React.FC<{ hasPendingWrites: boolean }> = ({ hasPendingWrites }) => {
   const isOnline = useOnlineStatus();
+  const [showSyncNotice, setShowSyncNotice] = useState(false);
 
-  if (isOnline && !hasPendingWrites) return null;
+  useEffect(() => {
+    if (hasPendingWrites && isOnline) {
+      setShowSyncNotice(true);
+      const timer = setTimeout(() => setShowSyncNotice(false), 3000);
+      return () => clearTimeout(timer);
+    } else {
+      setShowSyncNotice(false);
+    }
+  }, [hasPendingWrites, isOnline]);
+
+  if (isOnline && !showSyncNotice) return null;
 
   return (
-    <div className="fixed bottom-20 lg:bottom-5 left-4 z-40 flex items-center gap-2 rounded-xl bg-amber-600 text-white px-3.5 py-2 text-xs font-medium shadow-lg">
+    <div className="fixed bottom-20 lg:bottom-5 left-4 z-40 flex items-center gap-2 rounded-xl bg-amber-600 text-white px-3.5 py-2 text-xs font-medium shadow-lg transition-opacity duration-300">
       {!isOnline ? (
         <>
           <WifiOff className="w-4 h-4 shrink-0" />
-          <span>Offline Mode — Changes are saved locally and will sync automatically when online.</span>
+          <span>Offline Mode — Changes saved locally, will sync when reconnected.</span>
         </>
       ) : (
         <>
           <RefreshCw className="w-3.5 h-3.5 shrink-0 animate-spin" />
-          <span>Syncing local changes to Firebase cloud…</span>
+          <span>Syncing with cloud…</span>
         </>
       )}
     </div>
