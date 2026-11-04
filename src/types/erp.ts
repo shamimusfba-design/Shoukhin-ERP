@@ -108,6 +108,7 @@ export interface OrderRecord {
   note: string;
   createdAt: string;
   deliveredAt?: string;
+  deliveryDate?: string;
   approvedAt?: string;
   lines: OrderLineItem[];
   stockReturns: Record<string, number>;

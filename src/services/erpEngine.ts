@@ -252,14 +252,14 @@ export function isFinalStatus(status: OrderStatus): boolean {
 }
 
 export function getDeliveryDay(o: OrderRecord): string {
-  const v = String(o.deliveredAt || '').trim();
+  const v = String(o.deliveredAt || o.deliveryDate || o.date || '').trim();
   if (!v) return '';
   if (/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
   return '';
 }
 
 export function getEventDate(o: OrderRecord): string {
-  return ['Delivered', 'Partial'].includes(o.status) ? getDeliveryDay(o) : o.date;
+  return ['Delivered', 'Partial'].includes(o.status) ? (getDeliveryDay(o) || o.date) : o.date;
 }
 
 export function getOrderComponents(lines: OrderLineItem[]): Record<string, number> {
@@ -1880,7 +1880,7 @@ export function previewSteadfastImport(
   };
 }
 
-// Real Shoukhin Home Decor Data Seeder (111 Real Products & 1,731 Real Orders)
+// Real Shoukhin Home Decor Data Seeder (111 Real Products & 1,659 Real Orders)
 export function generateShoukhinDemoData(today: string): Partial<ErpDatabaseState> {
   const monthStart = today.slice(0, 7) + '-01';
 

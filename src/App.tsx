@@ -377,25 +377,34 @@ export default function App() {
         });
         setExistingDocIds(ids);
 
-        // FALLBACK: If Firestore database is currently empty (e.g. fresh deployment),
-        // fallback to the 111 real products and 1,539 real orders so the app is always populated!
+        // FALLBACK & SYNC: Always populate base real products and real orders
         const real = generateShoukhinDemoData(today);
         if (next.Products.length === 0) {
           next.Products = real.Products || [];
           next.Combos = real.Combos || [];
         }
-        if (next.Orders.length === 0) {
-          next.Orders = real.Orders || [];
-        }
-        // Deduplicate orders so an order never appears twice
+
+        // Merge real orders (including latest Steadfast export and recent orders) with Firestore records
         const uniqueOrdersMap = new Map<string, OrderRecord>();
+        for (const ord of (real.Orders || [])) {
+          const ordKey = ord.cid || ord.tracking || ord.id;
+          if (ordKey) {
+            uniqueOrdersMap.set(ordKey, ord);
+          }
+        }
         for (const ord of next.Orders) {
           const ordKey = ord.cid || ord.tracking || ord.id;
-          if (!uniqueOrdersMap.has(ordKey)) {
-            uniqueOrdersMap.set(ordKey, {
-              ...ord,
-              status: ord.status === 'Unknown' ? 'Pending' : ord.status,
-            });
+          if (!ordKey) continue;
+          const baseOrd = uniqueOrdersMap.get(ordKey);
+          if (baseOrd) {
+            // If base has verified Delivered / Partial status from Steadfast export, don't let stale Pending override it
+            if (baseOrd.status === 'Delivered' && ord.status === 'Pending') {
+              uniqueOrdersMap.set(ordKey, { ...ord, ...baseOrd });
+            } else {
+              uniqueOrdersMap.set(ordKey, { ...baseOrd, ...ord });
+            }
+          } else {
+            uniqueOrdersMap.set(ordKey, ord);
           }
         }
         next.Orders = Array.from(uniqueOrdersMap.values());
@@ -576,7 +585,7 @@ export default function App() {
           await batchSaveErpRecords(table as ErpTableName, items as any[], existingDocIds);
         }
       }
-      showToast('111 Real Products & 1,539 Real Orders loaded successfully!');
+      showToast(`111 Real Products & ${real.Orders?.length || 1659} Real Orders loaded successfully!`);
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to load real data');
     } finally {
@@ -590,7 +599,7 @@ export default function App() {
     try {
       const real = generateShoukhinDemoData(today);
       setErpState({ ...EMPTY_DB, ...real });
-      showToast('Demo data cleared! Reset to 111 Real Products and 1,539 Orders.');
+      showToast(`Demo data cleared! Reset to 111 Real Products and ${real.Orders?.length || 1659} Orders.`);
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Error clearing demo data');
     } finally {
