@@ -68,73 +68,79 @@ export const OrderFormModal: React.FC<{
     [lines]
   );
 
+  const [bookingLoading, setBookingLoading] = useState(false);
+
+  const buildOrderRecord = (): OrderRecord => {
+    const preparedLines: OrderLineItem[] = lines
+      .filter((l) => l.sku)
+      .map((l) => {
+        const catItem = catalog.find((c) => c.id === l.sku);
+        return {
+          sku: l.sku,
+          name: catItem?.name || l.name,
+          category: catItem?.category || l.category || 'Other',
+          qty: Number(l.qty || 1),
+          price: Number(l.price || 0),
+          cost: l.cost !== null && l.cost !== undefined ? Number(l.cost) : catItem?.cost ?? null,
+          returned: Number(l.returned || 0),
+          components: (catItem?.components || [{ sku: l.sku, qty: 1 }]).map((c) => ({
+            sku: c.sku,
+            qty: c.qty,
+            cost: catItem?.components
+              ? products.find((p) => p.id === c.sku)?.cost ?? null
+              : Number(l.cost ?? catItem?.cost ?? 0),
+          })),
+        };
+      });
+
+    const id = initial.id || 'ORD-' + Date.now();
+    const numTotal = total === '' ? lineSum : Number(total);
+    const numCod = cod === '' ? numTotal : Number(cod);
+
+    return {
+      id,
+      cid: initial.cid || '',
+      tracking: initial.tracking || '',
+      invoice: initial.invoice || 'SHD-' + String(Date.now()).slice(-6),
+      date,
+      deliveredAt: deliveredAt || '',
+      name: name.trim(),
+      phone: normalizePhone(phone),
+      address: address.trim(),
+      district: district || districtHint(address),
+      thana: thana.trim(),
+      total: numTotal,
+      cod: numCod,
+      shippingCharge: shippingCharge === '' ? null : Number(shippingCharge),
+      codCharge: codCharge === '' ? null : Number(codCharge),
+      returnCharge: Number(returnCharge || 0),
+      status,
+      source,
+      paymentStatus,
+      note: note.trim(),
+      createdAt: initial.createdAt || new Date().toISOString(),
+      lines: preparedLines,
+      stockReturns: initial.stockReturns || {},
+      financialReturns: initial.financialReturns || {},
+      stockReserved: !['Draft', 'Unknown'].includes(status),
+      dispatched: dispatched || ['Shipped', 'Delivered', 'Partial', 'Returned'].includes(status),
+      revision: (initial.revision || 0) + 1,
+      imported: initial.imported,
+      amountVerified,
+      itemsVerified,
+      finalAmount: amountVerified && finalAmount !== '' ? Number(finalAmount) : null,
+      bookingState: initial.bookingState || '',
+      lastSync: initial.lastSync || '',
+    };
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4">
       <form
         onSubmit={async (ev) => {
           ev.preventDefault();
           if (!canWrite) return;
-          const preparedLines: OrderLineItem[] = lines
-            .filter((l) => l.sku)
-            .map((l) => {
-              const catItem = catalog.find((c) => c.id === l.sku);
-              return {
-                sku: l.sku,
-                name: catItem?.name || l.name,
-                category: catItem?.category || l.category || 'Other',
-                qty: Number(l.qty || 1),
-                price: Number(l.price || 0),
-                cost: l.cost !== null && l.cost !== undefined ? Number(l.cost) : catItem?.cost ?? null,
-                returned: Number(l.returned || 0),
-                components: (catItem?.components || [{ sku: l.sku, qty: 1 }]).map((c) => ({
-                  sku: c.sku,
-                  qty: c.qty,
-                  cost: catItem?.components
-                    ? products.find((p) => p.id === c.sku)?.cost ?? null
-                    : Number(l.cost ?? catItem?.cost ?? 0),
-                })),
-              };
-            });
-
-          const id = initial.id || 'ORD-' + Date.now();
-          const numTotal = total === '' ? lineSum : Number(total);
-          const numCod = cod === '' ? numTotal : Number(cod);
-
-          const savedOrder: OrderRecord = {
-            id,
-            cid: initial.cid || '',
-            tracking: initial.tracking || '',
-            invoice: initial.invoice || 'SHD-' + String(Date.now()).slice(-6),
-            date,
-            deliveredAt: deliveredAt || '',
-            name: name.trim(),
-            phone: normalizePhone(phone),
-            address: address.trim(),
-            district: district || districtHint(address),
-            thana: thana.trim(),
-            total: numTotal,
-            cod: numCod,
-            shippingCharge: shippingCharge === '' ? null : Number(shippingCharge),
-            codCharge: codCharge === '' ? null : Number(codCharge),
-            returnCharge: Number(returnCharge || 0),
-            status,
-            source,
-            paymentStatus,
-            note: note.trim(),
-            createdAt: initial.createdAt || new Date().toISOString(),
-            lines: preparedLines,
-            stockReturns: initial.stockReturns || {},
-            financialReturns: initial.financialReturns || {},
-            stockReserved: !['Draft', 'Unknown'].includes(status),
-            dispatched: dispatched || ['Shipped', 'Delivered', 'Partial', 'Returned'].includes(status),
-            revision: (initial.revision || 0) + 1,
-            imported: initial.imported,
-            amountVerified,
-            itemsVerified,
-            finalAmount: amountVerified && finalAmount !== '' ? Number(finalAmount) : null,
-            bookingState: initial.bookingState || '',
-            lastSync: initial.lastSync || '',
-          };
+          const savedOrder = buildOrderRecord();
           await onSave(savedOrder);
         }}
         className="w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 sm:p-6 space-y-4"
