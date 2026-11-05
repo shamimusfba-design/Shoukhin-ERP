@@ -394,16 +394,20 @@ export default function App() {
         for (const ord of next.Orders) {
           const ordKey = ord.cid || ord.tracking || ord.id;
           if (!ordKey) continue;
+          const cleanOrd = { ...ord };
+          if (/^017000000\d{2}$/.test(cleanOrd.phone || '')) {
+            cleanOrd.phone = '';
+          }
           const baseOrd = uniqueOrdersMap.get(ordKey);
           if (baseOrd) {
-            // If base has verified Delivered / Partial status from Steadfast export, don't let stale Pending override it
-            if (baseOrd.status === 'Delivered' && ord.status === 'Pending') {
-              uniqueOrdersMap.set(ordKey, { ...ord, ...baseOrd });
+            // Prefer verified status from Steadfast
+            if ((baseOrd.status === 'Delivered' || baseOrd.status === 'In Review' || baseOrd.status === 'Partial') && ord.status === 'Pending') {
+              uniqueOrdersMap.set(ordKey, { ...cleanOrd, ...baseOrd });
             } else {
-              uniqueOrdersMap.set(ordKey, { ...baseOrd, ...ord });
+              uniqueOrdersMap.set(ordKey, { ...baseOrd, ...cleanOrd });
             }
           } else {
-            uniqueOrdersMap.set(ordKey, ord);
+            uniqueOrdersMap.set(ordKey, cleanOrd);
           }
         }
         next.Orders = Array.from(uniqueOrdersMap.values());
@@ -841,7 +845,7 @@ export default function App() {
           cid: isTracking ? undefined : trimmed,
           tracking: isTracking ? trimmed : undefined,
           name: 'Steadfast Customer (' + trimmed + ')',
-          phone: '01700000000',
+          phone: '',
           address: 'Bangladesh',
           district: 'Dhaka',
           date: new Date().toISOString().slice(0, 10),
